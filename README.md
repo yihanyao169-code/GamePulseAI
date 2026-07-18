@@ -25,7 +25,6 @@ GamePulse AI 是一款面向游戏发行与运营人员的 Google Play 评论智
 ```text
 .
 ├── app.py                 # Streamlit 应用入口
-├── assets/                # 项目图片与界面参考资源
 ├── docs/                  # 项目文档与评估框架
 ├── scripts/               # 辅助检查脚本
 ├── src/                   # 抓取、分析、评估、会话与报告导出模块
