@@ -26,14 +26,14 @@ GamePulse AI 是一款面向游戏发行与运营人员的 Google Play 评论智
 .
 ├── app.py                 # Streamlit 应用入口
 ├── assets/                # 项目图片与界面参考资源
-├── docs/                  # Evaluation Framework PDF 文档
+├── docs/                  # 项目文档与评估框架
 ├── scripts/               # 辅助检查脚本
 ├── src/                   # 抓取、分析、评估、会话与报告导出模块
 ├── tests/                 # 自动化测试
 ├── .env.example           # 环境变量示例
 ├── requirements.txt       # Python 依赖
 ├── README.md              # 项目交付说明
-└── render.yaml            # 后续部署配置
+└── render.yaml            # 云平台部署配置
 ```
 
 ## 安装
@@ -46,15 +46,24 @@ pip install -r requirements.txt
 
 ## 配置 Claude API Key
 
-本项目提交版本已配置测试用 Claude API Key，可直接运行。该 Key 已设置费用上限，仅用于评审测试。如测试额度耗尽，可在项目根目录的 `.env` 文件中替换 `ANTHROPIC_API_KEY`。
-
-手动配置格式：
+项目使用 Anthropic Claude API 进行评论分析。请在项目根目录配置 `.env` 文件：
 
 ```text
 ANTHROPIC_API_KEY=你的 Anthropic API Key
 ```
 
+## AI 工作流
+
+1. Google Play 评论采集
+2. 评论清洗与语言过滤
+3. Claude API 评论分析
+4. 玩家反馈总结生成
+5. 运营洞察与评分生成
+6. PPT 报告导出
+
 ## 运行
+
+完成依赖安装和 Claude API Key 配置后即可运行，无需修改代码文件。
 
 ```bash
 python -m streamlit run app.py
@@ -93,4 +102,4 @@ python -m streamlit run app.py --server.port 8502
 
 ## 部署
 
-项目同时保留 `render.yaml`，可用于后续部署。
+项目已提供 `render.yaml` 部署配置，可用于云平台部署。
