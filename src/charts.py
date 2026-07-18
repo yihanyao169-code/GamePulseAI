@@ -15,12 +15,14 @@ def configure_chinese_font(theme_mode: str = "dark") -> dict:
     tokens = theme.chart_tokens(theme_mode)
     plt.rcParams["font.sans-serif"] = [
         "Noto Sans CJK SC",
+        "Noto Sans CJK JP",
         "Arial Unicode MS",
         "PingFang SC",
         "SimHei",
         "Microsoft YaHei",
         "DejaVu Sans",
     ]
+    plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["axes.unicode_minus"] = False
     plt.rcParams["figure.facecolor"] = tokens["background"]
     plt.rcParams["axes.facecolor"] = tokens["background"]
