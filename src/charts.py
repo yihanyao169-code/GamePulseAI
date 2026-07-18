@@ -14,6 +14,7 @@ def configure_chinese_font(theme_mode: str = "dark") -> dict:
     plt.rcdefaults()
     tokens = theme.chart_tokens(theme_mode)
     plt.rcParams["font.sans-serif"] = [
+        "Noto Sans CJK SC",
         "Arial Unicode MS",
         "PingFang SC",
         "SimHei",
