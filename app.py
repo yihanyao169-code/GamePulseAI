@@ -324,7 +324,7 @@ def _localize_cross_game_row(row: dict) -> dict:
 
 
 def _create_cross_game_radar_chart(rows: list[dict], theme_mode: str):
-    labels = ["综合评分", "健康度", "满意度", "优势", "可信度"]
+    labels = ["Overall Score", "Product Health", "Satisfaction", "Strengths", "Confidence"]
     metric_keys = ["Overall", "Health", "Satisfaction", "Strength", "Confidence"]
     angles = [index / float(len(labels)) * 2 * 3.141592653589793 for index in range(len(labels))]
     angles += angles[:1]
@@ -2202,16 +2202,16 @@ def _render_market_comparison_saved(payload: dict, config: dict) -> None:
 
 def _create_market_charts_for_payload(payload: dict, temp_path: Path, theme_mode: str) -> list[Path]:
     rows = payload["rows"]
-    entity_name = "区域" if payload["analysis_level"] == "区域对比" else "市场"
-    negative_chart = create_market_bar_chart(rows, "负面占比", f"各{entity_name}负面评论占比", temp_path / "negative.png", theme_mode=theme_mode)
+    entity_name = "Region" if payload["analysis_level"] == "区域对比" else "Market"
+    negative_chart = create_market_bar_chart(rows, "负面占比", f"Negative Reviews by {entity_name}", temp_path / "negative.png", theme_mode=theme_mode)
     category_chart = create_market_category_distribution_chart(rows, temp_path / "category_distribution.png", theme_mode=theme_mode)
-    monetization_chart = create_market_bar_chart(rows, "氪金占比", f"各{entity_name}氪金争议占比", temp_path / "monetization.png", theme_mode=theme_mode)
+    monetization_chart = create_market_bar_chart(rows, "氪金占比", f"Monetization Issues by {entity_name}", temp_path / "monetization.png", theme_mode=theme_mode)
     average_score_chart = create_market_bar_chart(
         rows,
         "平均星级",
-        f"各{entity_name}平均星级",
+        f"Average Rating by {entity_name}",
         temp_path / "average_score.png",
-        y_label="平均星级",
+        y_label="Average Rating",
         value_suffix="",
         theme_mode=theme_mode,
     )

@@ -10,6 +10,33 @@ from src.chart_data import prepare_chart_category_data
 from src import theme
 
 
+CHART_CATEGORY_LABELS = {
+    "整体评价": "Overall Feedback",
+    "游戏玩法": "Gameplay",
+    "BUG": "Bugs",
+    "性能优化": "Performance",
+    "氪金": "Monetization",
+    "UI体验": "UI Experience",
+    "美术": "Visual Art",
+    "活动运营": "Live Operations",
+    "新手引导": "Onboarding",
+    "社交": "Social",
+    "其他": "Other",
+    "其他类别": "Other Categories",
+}
+
+CHART_MARKET_LABELS = {
+    "日本": "Japan", "韩国": "South Korea", "中国台湾": "Taiwan", "中国香港": "Hong Kong",
+    "新加坡": "Singapore", "马来西亚": "Malaysia", "印度尼西亚": "Indonesia", "泰国": "Thailand",
+    "越南": "Vietnam", "菲律宾": "Philippines", "英国": "United Kingdom", "德国": "Germany",
+    "法国": "France", "西班牙": "Spain", "意大利": "Italy", "波兰": "Poland", "美国": "United States",
+    "加拿大": "Canada", "巴西": "Brazil", "墨西哥": "Mexico", "阿根廷": "Argentina", "智利": "Chile",
+    "哥伦比亚": "Colombia", "澳大利亚": "Australia", "新西兰": "New Zealand", "东亚": "East Asia",
+    "东南亚": "Southeast Asia", "欧洲": "Europe", "北美": "North America", "拉美": "Latin America",
+    "大洋洲": "Oceania",
+}
+
+
 def configure_chinese_font(theme_mode: str = "dark") -> dict:
     plt.style.use("default")
     plt.rcdefaults()
@@ -73,16 +100,16 @@ def _style_axis(ax, tokens: dict) -> None:
 def create_bar_chart(category_counts: dict[str, int], output_path: Path, theme_mode: str = "dark") -> Path:
     tokens = configure_chinese_font(theme_mode)
     chart_data = prepare_chart_category_data(category_counts)
-    categories = [item["category"] for item in chart_data]
+    categories = [_chart_category_label(item["category"]) for item in chart_data]
     counts = [item["count"] for item in chart_data]
 
     fig_height = max(5.5, len(categories) * 0.55)
     fig, ax = plt.subplots(figsize=(9, fig_height))
     colors = [item["color"] for item in chart_data]
     bars = ax.barh(categories, counts, color=colors, edgecolor=tokens["background"], linewidth=1.0)
-    ax.set_title("评论类别数量统计", color=tokens["text"])
-    ax.set_xlabel("评论数量")
-    ax.set_ylabel("类别")
+    ax.set_title("Category Analysis", color=tokens["text"])
+    ax.set_xlabel("Review Count")
+    ax.set_ylabel("Issue Categories")
     ax.invert_yaxis()
     ax.tick_params(axis="both", labelsize=13)
     ax.title.set_fontsize(16)
@@ -113,7 +140,7 @@ def create_pie_chart(category_counts: dict[str, int], output_path: Path, theme_m
 
     fig, ax = plt.subplots(figsize=(7, 5))
     if chart_data:
-        labels = [item["category"] for item in chart_data]
+        labels = [_chart_category_label(item["category"]) for item in chart_data]
         values = [item["count"] for item in chart_data]
         colors = [item["color"] for item in chart_data]
         wedges, _, autotexts = ax.pie(
@@ -140,8 +167,8 @@ def create_pie_chart(category_counts: dict[str, int], output_path: Path, theme_m
         for text in legend.get_texts():
             text.set_color(tokens["text"])
     else:
-        ax.text(0.5, 0.5, "暂无数据", ha="center", va="center", fontsize=16, color=tokens["muted"])
-    ax.set_title("评论类别占比", color=tokens["text"])
+        ax.text(0.5, 0.5, "No Data Available", ha="center", va="center", fontsize=16, color=tokens["muted"])
+    ax.set_title("Issue Category Percentage", color=tokens["text"])
     ax.axis("equal")
     fig.tight_layout(pad=0.7)
     fig.savefig(output_path, dpi=180, bbox_inches="tight", pad_inches=0.08)
@@ -161,12 +188,12 @@ def create_market_bar_chart(
     value_key: str,
     title: str,
     output_path: Path,
-    y_label: str = "占比 (%)",
+    y_label: str = "Percentage (%)",
     value_suffix: str = "%",
     theme_mode: str = "dark",
 ) -> Path:
     tokens = configure_chinese_font(theme_mode)
-    markets = [row["市场"] for row in rows]
+    markets = [_chart_market_label(row["市场"]) for row in rows]
     values = [_to_float(row[value_key]) for row in rows]
 
     fig, ax = plt.subplots(figsize=(11, 6))
@@ -195,19 +222,20 @@ def create_market_bar_chart(
 
 def create_market_category_distribution_chart(rows: list[dict], output_path: Path, theme_mode: str = "dark") -> Path:
     tokens = configure_chinese_font(theme_mode)
-    markets = [row["市场"] for row in rows]
+    markets = [_chart_market_label(row["市场"]) for row in rows]
     keys = ["游戏玩法占比", "BUG占比", "氪金占比", "性能问题占比", "整体评价占比"]
+    labels = ["Gameplay", "Bugs", "Monetization", "Performance", "Overall Feedback"]
     colors = tokens["colors"][: len(keys)]
 
     fig, ax = plt.subplots(figsize=(12, 6))
     bottoms = [0.0 for _ in markets]
-    for key, color in zip(keys, colors):
+    for key, label, color in zip(keys, labels, colors):
         values = [_to_float(row[key]) for row in rows]
-        ax.bar(markets, values, bottom=bottoms, label=key.replace("占比", ""), color=color)
+        ax.bar(markets, values, bottom=bottoms, label=label, color=color)
         bottoms = [bottom + value for bottom, value in zip(bottoms, values)]
 
-    ax.set_title("各市场主要问题类别分布", fontsize=18, color=tokens["text"])
-    ax.set_ylabel("占比 (%)", fontsize=14)
+    ax.set_title("Issue Categories by Market", fontsize=18, color=tokens["text"])
+    ax.set_ylabel("Percentage (%)", fontsize=14)
     ax.tick_params(axis="both", labelsize=12)
     _style_axis(ax, tokens)
     legend = ax.legend(loc="upper right", facecolor=tokens["surface"], edgecolor=tokens["border"])
@@ -224,3 +252,11 @@ def _to_float(value) -> float:
         return float(str(value).rstrip("%"))
     except ValueError:
         return 0.0
+
+
+def _chart_category_label(value: str) -> str:
+    return CHART_CATEGORY_LABELS.get(str(value), str(value))
+
+
+def _chart_market_label(value: str) -> str:
+    return CHART_MARKET_LABELS.get(str(value), str(value))
