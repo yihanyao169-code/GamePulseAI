@@ -62,7 +62,7 @@ def save_analysis(payload: dict[str, Any], signature: AnalysisSignature) -> None
     if stored_payload.get("record_id"):
         st.session_state[CURRENT_ANALYSIS_RECORD_ID_KEY] = stored_payload["record_id"]
     st.session_state.pop(PPT_STATE_KEY, None)
-    if stored_payload.get("type") == "single" and not stored_payload.get("summary_error"):
+    if stored_payload.get("type") == "single":
         save_single_report(stored_payload)
 
 

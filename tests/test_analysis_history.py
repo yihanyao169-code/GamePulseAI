@@ -70,6 +70,22 @@ def test_consecutive_game_analyses_keep_both_history_records(monkeypatch) -> Non
     assert records[0]["record_id"] != records[1]["record_id"]
 
 
+def test_summary_error_still_saves_second_game_history_record(monkeypatch) -> None:
+    _patch_state(monkeypatch)
+    signature = session_manager.AnalysisSignature.from_config({})
+    first = _payload("pkg.first", score=71)
+    second = _payload("pkg.second", score=82)
+    second["summary_error"] = "summary request failed"
+
+    session_manager.save_analysis(first, signature)
+    session_manager.clear_analysis()
+    session_manager.save_analysis(second, signature)
+
+    records = session_manager.get_single_reports()
+    assert [record["package_name"] for record in records] == ["pkg.second", "pkg.first"]
+    assert records[0]["summary_error"] == "summary request failed"
+
+
 def test_distinct_raw_game_inputs_do_not_dedupe_when_package_identity_is_missing(monkeypatch) -> None:
     _patch_state(monkeypatch)
     first = _payload("")
