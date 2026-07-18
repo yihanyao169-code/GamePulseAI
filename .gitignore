@@ -1,0 +1,11 @@
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+debug/
+tmp/
+venv/
+.venv/
+.streamlit-home/
