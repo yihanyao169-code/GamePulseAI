@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 
 from src.reporting import sort_category_counts
 from src.chart_data import prepare_chart_category_data
@@ -13,16 +14,30 @@ def configure_chinese_font(theme_mode: str = "dark") -> dict:
     plt.style.use("default")
     plt.rcdefaults()
     tokens = theme.chart_tokens(theme_mode)
-    plt.rcParams["font.sans-serif"] = [
-        "Noto Sans CJK SC",
-        "Noto Sans CJK JP",
-        "Arial Unicode MS",
-        "PingFang SC",
-        "SimHei",
-        "Microsoft YaHei",
-        "DejaVu Sans",
-    ]
+    noto_font_loaded = False
+    for font_path in font_manager.findSystemFonts():
+        font_filename = Path(font_path).name.replace("-", "")
+        if "NotoSansCJK" not in font_filename and "NotoSansCJKRegular" not in font_filename:
+            continue
+        try:
+            font_manager.fontManager.addfont(font_path)
+            noto_font_loaded = True
+        except (OSError, RuntimeError):
+            continue
+
     plt.rcParams["font.family"] = "sans-serif"
+    if noto_font_loaded:
+        plt.rcParams["font.sans-serif"] = ["Noto Sans CJK SC"]
+    else:
+        plt.rcParams["font.sans-serif"] = [
+            "Noto Sans CJK SC",
+            "Noto Sans CJK JP",
+            "Arial Unicode MS",
+            "PingFang SC",
+            "SimHei",
+            "Microsoft YaHei",
+            "DejaVu Sans",
+        ]
     plt.rcParams["axes.unicode_minus"] = False
     plt.rcParams["figure.facecolor"] = tokens["background"]
     plt.rcParams["axes.facecolor"] = tokens["background"]
