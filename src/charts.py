@@ -14,8 +14,13 @@ def configure_chinese_font(theme_mode: str = "dark") -> dict:
     plt.style.use("default")
     plt.rcdefaults()
     tokens = theme.chart_tokens(theme_mode)
+    system_fonts = font_manager.findSystemFonts()
+    for font_path in system_fonts:
+        if "Noto" in font_path:
+            print(font_path)
+
     noto_font_loaded = False
-    for font_path in font_manager.findSystemFonts():
+    for font_path in system_fonts:
         font_filename = Path(font_path).name.replace("-", "")
         if "NotoSansCJK" not in font_filename and "NotoSansCJKRegular" not in font_filename:
             continue
