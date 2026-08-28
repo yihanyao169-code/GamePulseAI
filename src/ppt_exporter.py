@@ -24,19 +24,19 @@ def _rgb(hex_color: str) -> RGBColor:
     return RGBColor(int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
 
 
-PRIMARY = _rgb("#F5E400")
-SECONDARY = _rgb("#333333")
-ACCENT = _rgb("#111111")
-BACKGROUND = _rgb("#F5F5F2")
-CARD = _rgb("#FFFFFF")
-TEXT = _rgb("#111111")
-MUTED = _rgb("#555555")
-BORDER = _rgb("#D9D9D4")
-NAVY = _rgb("#F0F0EC")
-GREEN = _rgb("#666666")
-AMBER = _rgb("#B89F00")
-GRID = _rgb("#E6E6E0")
-CHART_PALETTE = ["#F5C400", "#2F6BFF", "#27C4C2", "#42B866", "#8A5CF6", "#E84A8A", "#F28C38", "#A5A7AC"]
+PRIMARY = _rgb(theme.GP_YELLOW)
+SECONDARY = _rgb(theme.GP_BLUE)
+ACCENT = _rgb(theme.GP_MAGENTA)
+BACKGROUND = _rgb(theme.GP_BG)
+CARD = _rgb(theme.GP_SURFACE)
+TEXT = _rgb(theme.GP_TEXT)
+MUTED = _rgb(theme.GP_TEXT_SECONDARY)
+BORDER = _rgb(theme.GP_BORDER)
+NAVY = _rgb(theme.GP_BG)
+GREEN = _rgb(theme.GP_BLUE)
+AMBER = _rgb(theme.GP_TEXT_SECONDARY)
+GRID = _rgb(theme.GP_BORDER)
+CHART_PALETTE = theme.CHART_PALETTE
 FONT = "Microsoft YaHei"
 REPORT_TIME = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -205,10 +205,10 @@ def _add_score_summary_slide(presentation: Presentation, rows: list[dict], repor
     _rect(slide, 0.95, 2.38, 0.9, 0.34, PRIMARY, line=PRIMARY)
     _text(slide, grade_text, 1.03, 2.47, 0.74, 0.1, 9, TEXT, bold=True, align=PP_ALIGN.CENTER)
     _text(slide, confidence_text, 2.05, 2.44, 1.3, 0.18, 12, TEXT, bold=True)
-    _text(slide, str(report.get("score_reason", "")), 0.95, 2.92, 2.45, 0.3, 11, MUTED)
+    _text(slide, _truncate(str(report.get("score_reason", "")), 90), 0.95, 2.92, 2.45, 0.45, 11, MUTED)
     _card(slide, 4.1, 1.25, 8.55, 2.25)
     _text(slide, "整体概括", 4.38, 1.52, 1.4, 0.25, 17, TEXT, bold=True)
-    _text(slide, str(report.get("overall_summary", "暂无总结")), 4.38, 1.98, 7.8, 0.85, 14, TEXT)
+    _text(slide, _truncate(str(report.get("overall_summary", "暂无总结")), 180), 4.38, 1.98, 7.8, 0.85, 14, TEXT)
     metrics = _dashboard_metrics(rows)
     for index, (label, value) in enumerate([("负面率", metrics["negative"]), ("Top Category", metrics["top_category"]), ("BUG占比", metrics["bug"]), ("氪金占比", metrics["monetization"])]):
         x = 0.65 + index * 3.05
@@ -225,9 +225,11 @@ def _add_category_stats_slide(presentation: Presentation, result: AnalysisResult
     slide = _content_slide(presentation, "Category Statistics", "类别统计、占比与评论数量排名")
     sorted_counts = sort_category_counts(result.category_counts)
     total = max(sum(sorted_counts.values()), 1)
-    _card(slide, 0.65, 1.22, 4.0, 5.55)
+    rows = list(sorted_counts.items())[:11]
+    card_h = min(5.55, max(1.0, 0.68 + max(len(rows) - 1, 0) * 0.38))
+    _card(slide, 0.65, 1.22, 4.0, card_h)
     _text(slide, "Rank  Category  Count  Percent", 0.9, 1.55, 3.3, 0.18, 10, MUTED, bold=True)
-    for index, (category, count) in enumerate(list(sorted_counts.items())[:11], start=1):
+    for index, (category, count) in enumerate(rows, start=1):
         y = 1.9 + (index - 1) * 0.38
         _text(slide, f"{index:02d}", 0.9, y, 0.35, 0.16, 9, MUTED, bold=True)
         _text(slide, category, 1.32, y, 1.1, 0.16, 10, TEXT, bold=True)
@@ -259,15 +261,19 @@ def _add_sentiment_reviews_slide(presentation: Presentation, result: AnalysisRes
         _card(slide, x, 1.25, 1.7, 1.1)
         _text(slide, key, x + 0.18, 1.46, 0.9, 0.16, 11, MUTED, bold=True)
         _text(slide, _pct_text(sentiments[key]), x + 0.18, 1.78, 1.1, 0.28, 19, TEXT, bold=True)
-    _text(slide, report["sentiment_conclusion"], 0.78, 2.62, 5.55, 0.5, 13, TEXT)
+    _text(slide, _truncate(report["sentiment_conclusion"], 140), 0.78, 2.62, 5.55, 0.9, 13, TEXT)
     reviews = result.classified_reviews[:4]
-    for index, review in enumerate(reviews):
+    for index in range(4):
         x = 6.75
         y = 1.25 + index * 1.28
         _card(slide, x, y, 5.65, 1.0)
-        _text(slide, f"{review.category} · {review.sentiment}", x + 0.18, y + 0.16, 1.7, 0.15, 9, TEXT, bold=True)
-        _text(slide, _truncate(review.content, 70), x + 0.18, y + 0.4, 5.0, 0.2, 9, TEXT)
-        _text(slide, _truncate(review.reason or "暂无概括", 54), x + 0.18, y + 0.68, 5.0, 0.16, 8, MUTED)
+        if index < len(reviews):
+            review = reviews[index]
+            _text(slide, f"{review.category} · {review.sentiment}", x + 0.18, y + 0.16, 1.7, 0.15, 9, TEXT, bold=True)
+            _text(slide, _truncate(review.content, 70), x + 0.18, y + 0.4, 5.0, 0.2, 9, TEXT)
+            _text(slide, _truncate(review.reason or "暂无概括", 54), x + 0.18, y + 0.68, 5.0, 0.16, 8, MUTED)
+        else:
+            _text(slide, "暂无更多代表性评论样本", x + 0.18, y + 0.42, 5.0, 0.2, 10, MUTED, align=PP_ALIGN.CENTER)
 
 
 def _add_structured_recommendations_slide(presentation: Presentation, report: dict) -> None:
@@ -276,13 +282,18 @@ def _add_structured_recommendations_slide(presentation: Presentation, report: di
     for index, level in enumerate(["P0", "P1", "P2"]):
         x = 0.75 + index * 4.05
         _text(slide, {"P0": "P0 立即处理", "P1": "P1 近期优化", "P2": "P2 长期建设"}[level], x, 1.25, 2.2, 0.25, 17, TEXT, bold=True)
-        for item_index, item in enumerate(recommendations.get(level, [])[:2]):
+        level_items = recommendations.get(level, [])[:2]
+        for item_index in range(2):
             y = 1.78 + item_index * 2.2
             _card(slide, x, y, 3.55, 1.85)
-            _text(slide, item.get("title", "建议"), x + 0.18, y + 0.18, 3.0, 0.2, 12, TEXT, bold=True)
-            _text(slide, "依据：" + item.get("basis", ""), x + 0.18, y + 0.52, 3.05, 0.25, 9, MUTED)
-            _text(slide, "动作：" + item.get("action", ""), x + 0.18, y + 0.92, 3.05, 0.33, 9, MUTED)
-            _text(slide, "收益：" + item.get("impact", ""), x + 0.18, y + 1.4, 3.05, 0.22, 9, MUTED)
+            if item_index < len(level_items):
+                item = level_items[item_index]
+                _text(slide, item.get("title", "建议"), x + 0.18, y + 0.18, 3.0, 0.2, 12, TEXT, bold=True)
+                _text(slide, "依据：" + _truncate(item.get("basis", ""), 40), x + 0.18, y + 0.52, 3.05, 0.25, 9, MUTED)
+                _text(slide, "动作：" + _truncate(item.get("action", ""), 48), x + 0.18, y + 0.92, 3.05, 0.33, 9, MUTED)
+                _text(slide, "收益：" + _truncate(item.get("impact", ""), 36), x + 0.18, y + 1.4, 3.05, 0.22, 9, MUTED)
+            else:
+                _text(slide, "暂无该级别建议", x + 0.18, y + 0.83, 3.15, 0.2, 11, MUTED, align=PP_ALIGN.CENTER)
 
 
 def _add_methodology_slide(presentation: Presentation, context: dict | None = None) -> None:
@@ -304,9 +315,8 @@ def _add_methodology_slide(presentation: Presentation, context: dict | None = No
 
 
 def _add_market_comparison_pages(presentation: Presentation, rows: list[dict]) -> None:
-    chunks = [rows[:4]]
-    if len(rows) > 4:
-        chunks.append(rows[4:8])
+    chunk_size = 4
+    chunks = [rows[i:i + chunk_size] for i in range(0, len(rows), chunk_size)] or [[]]
     for index, chunk in enumerate(chunks, start=1):
         suffix = f" ({index}/{len(chunks)})" if len(chunks) > 1 else ""
         slide = _content_slide(presentation, "Market Comparison" + suffix, "市场关键指标横向对比")
@@ -340,9 +350,14 @@ def _add_representative_reviews(
     if not markets:
         _text(slide, "暂无代表性评论样本", 0.75, 3.1, 11.8, 0.35, 18, MUTED, align=PP_ALIGN.CENTER)
         return
-    for index, (market, reviews) in enumerate(markets):
+    for index in range(3):
         x = 0.65 + index * 4.12
-        _review_market_column(slide, market, reviews, x, 1.25)
+        if index < len(markets):
+            market, reviews = markets[index]
+            _review_market_column(slide, market, reviews, x, 1.25)
+        else:
+            _card(slide, x, 1.25, 3.75, 5.55)
+            _text(slide, "暂无更多市场样本", x + 0.25, 3.9, 3.25, 0.35, 13, MUTED, align=PP_ALIGN.CENTER)
 
 
 def _add_recommendations(presentation: Presentation, source_text: str) -> None:
@@ -358,7 +373,7 @@ def _content_slide(presentation: Presentation, title: str, subtitle: str):
     slide = _blank_slide(presentation)
     _text(slide, title.upper(), 0.65, 0.34, 7.8, 0.42, 29, TEXT, bold=True)
     _text(slide, subtitle, 0.67, 0.82, 6.8, 0.23, 13, MUTED)
-    _rect(slide, 0.65, 1.07, 1.18, 0.045, PRIMARY, radius=False, line=PRIMARY)
+    _rect(slide, 0.65, 1.07, 1.18, 0.045, SECONDARY, radius=False, line=SECONDARY)
     _text(slide, "SYSTEM // GAMEPULSE", 9.1, 0.82, 2.1, 0.15, 8, MUTED, bold=True, align=PP_ALIGN.RIGHT)
     _brand_mark(slide, 11.5, 0.38)
     return slide
@@ -483,7 +498,7 @@ def _recommendation_column(slide, level: str, items: list[dict], x: float, y: fl
 
 def _cover_info(slide, label: str, value: str, x: float, y: float) -> None:
     _text(slide, label.upper(), x, y, 1.65, 0.21, 10, TEXT, bold=True)
-    _rect(slide, x, y + 0.24, 0.42, 0.035, PRIMARY, radius=False, line=PRIMARY)
+    _rect(slide, x, y + 0.24, 0.42, 0.035, SECONDARY, radius=False, line=SECONDARY)
     _text(slide, _truncate(value, 55), x + 1.82, y - 0.02, 5.2, 0.25, 13, TEXT, bold=True)
 
 
@@ -507,7 +522,7 @@ def _dashboard_tile(slide, title: str, value: str, x: float, y: float, w: float,
 
 def _card(slide, x: float, y: float, w: float, h: float) -> None:
     _rect(slide, x, y, w, h, CARD, radius=False, line=BORDER)
-    _corner_brackets(slide, x, y, w, h, PRIMARY)
+    _corner_brackets(slide, x, y, w, h, SECONDARY)
 
 
 def add_card(slide, x: float, y: float, w: float, h: float):
@@ -624,20 +639,24 @@ def _bullet_cards(slide, items: list[dict], x: float, y: float, w: float, h: flo
     if not items:
         items = [{"title": "暂无足够信息", "detail": "当前样本不足以形成稳定结论。"}]
     col_w = w / columns - 0.12
-    row_h = min(1.02, h / max((len(items) + columns - 1) // columns, 1) - 0.08)
-    for index, item in enumerate(items[:6]):
+    rows = (len(items) + columns - 1) // columns
+    row_h = min(1.02, h / max(rows, 1) - 0.08)
+    chars_per_line = max(int((col_w - 0.52) * 72 / 9), 10)
+    lines_avail = max(int((row_h - 0.28) / 0.17), 1)
+    detail_limit = chars_per_line * lines_avail
+    for index, item in enumerate(items):
         col = index % columns
         row = index // columns
         xx = x + col * (col_w + 0.24)
         yy = y + row * (row_h + 0.16)
         _card(slide, xx, yy, col_w, row_h)
-        _rect(slide, xx + 0.16, yy + 0.17, 0.08, 0.5, PRIMARY, radius=False, line=PRIMARY)
+        _rect(slide, xx + 0.16, yy + 0.17, 0.08, 0.5, SECONDARY, radius=False, line=SECONDARY)
         _text(slide, item.get("title", "要点"), xx + 0.34, yy + 0.15, col_w - 0.52, 0.18, 11, TEXT, bold=True)
-        _text(slide, item.get("detail", ""), xx + 0.34, yy + 0.43, col_w - 0.52, max(row_h - 0.55, 0.25), 9, MUTED)
+        _text(slide, _truncate(item.get("detail", ""), detail_limit), xx + 0.34, yy + 0.43, col_w - 0.52, max(row_h - 0.55, 0.25), 9, MUTED)
 
 
 def _number_dot(slide, number: int, x: float, y: float) -> None:
-    _rect(slide, x, y, 0.24, 0.24, PRIMARY, line=PRIMARY)
+    _rect(slide, x, y, 0.24, 0.24, SECONDARY, line=SECONDARY)
     _text(slide, str(number), x, y + 0.045, 0.24, 0.08, 7, TEXT, bold=True, align=PP_ALIGN.CENTER)
 
 
@@ -653,7 +672,7 @@ def _brand_mark(slide, x: float, y: float) -> None:
 
 def _triangle_logo(slide, x: float, y: float) -> None:
     _rect(slide, x, y + 0.02, 0.18, 0.28, PRIMARY, line=PRIMARY)
-    _rect(slide, x + 0.12, y + 0.08, 0.18, 0.22, GREEN, line=GREEN)
+    _rect(slide, x + 0.12, y + 0.08, 0.18, 0.22, ACCENT, line=ACCENT)
     _rect(slide, x + 0.21, y + 0.14, 0.14, 0.14, SECONDARY, line=SECONDARY)
 
 

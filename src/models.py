@@ -52,6 +52,45 @@ class ClassifiedReview:
 
 
 @dataclass(frozen=True)
+class GameSearchResult:
+    app_id: str
+    title: str
+    developer: str
+    icon: str
+    score: float | None
+
+
+@dataclass(frozen=True)
+class StoreListing:
+    title: str
+    app_id: str
+    developer: str
+    genre: str
+    score: float | None
+    ratings: int | None
+    reviews: int | None
+    installs: str
+    min_installs: int | None
+    real_installs: int | None
+    offers_iap: bool
+    contains_ads: bool
+    released: str
+    last_updated_on: str
+    version: str
+    icon: str
+    country: str
+    fetched_at: str
+
+
+@dataclass(frozen=True)
+class MarketListingOutcome:
+    country: str
+    status: str
+    listing: StoreListing | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class AnalysisResult:
     classified_reviews: list[ClassifiedReview]
     category_counts: dict[str, int]

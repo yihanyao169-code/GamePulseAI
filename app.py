@@ -38,7 +38,17 @@ from src.cross_game import build_cross_game_rows, build_cross_game_summary, publ
 from src.google_play import FETCH_CACHE_VERSION, extract_package_name, fetch_reviews_with_meta
 from src.language_filter import filter_reviews_by_language
 from src.market_config import MARKET_CONFIG, REGION_MARKETS, default_language as market_default_language, market_label, market_region
-from src.models import AnalysisResult, DEFAULT_COUNTRY, DEFAULT_LANGUAGE, DEFAULT_REVIEW_COUNT, REVIEW_CATEGORIES, ReviewItem
+from src.models import (
+    AnalysisResult,
+    DEFAULT_COUNTRY,
+    DEFAULT_LANGUAGE,
+    DEFAULT_REVIEW_COUNT,
+    GameSearchResult,
+    REVIEW_CATEGORIES,
+    ReviewItem,
+    StoreListing,
+)
+from src.store_performance import SEARCH_CACHE_VERSION, fetch_store_listing, search_games
 from src.evaluation import (
     FRAMEWORK_NAME,
     FRAMEWORK_VERSION,
@@ -66,6 +76,7 @@ from src import session_manager
 from src import theme
 from src import time_scope as time_scope_utils
 from src import ui_components as ui
+from src import workspace_store
 
 
 load_dotenv()
@@ -109,30 +120,69 @@ MIN_SCORABLE_REVIEWS = 10
 
 ANALYSIS_RUNNING_KEY = "analysis_running"
 
+NAV_ITEMS = [
+    ("home", "首页", "首页"),
+    ("single", "单市场分析", "单市场分析"),
+    ("market", "跨市场分析", "跨市场比较"),
+    ("workspace", "工作台", "AI 研究工作台"),
+    ("history", "分析记录", "分析记录"),
+]
+
+_BRAND_HERO_CONTENT = {
+    "首页": {
+        "page_code": "01",
+        "page_name": "首页",
+        "description": "分析玩家评价，比较市场差异，辅助游戏发行判断。",
+        "english_tag": "OVERVIEW",
+    },
+    "单市场分析": {
+        "page_code": "01",
+        "page_name": "单市场分析",
+        "description": "选择一个游戏和目标市场，从玩家评论中提取反馈并生成分析结果。",
+        "english_tag": "MARKET ANALYSIS",
+    },
+    "跨市场分析": {
+        "page_code": "02",
+        "page_name": "跨市场分析",
+        "description": "比较同一游戏在不同市场中的玩家反馈、问题差异和市场表现。",
+        "english_tag": "MARKET COMPARISON",
+    },
+}
+
 
 def main() -> None:
     theme_choice = st.session_state.get("theme_choice", "跟随系统")
     ui.inject_theme_css(theme_choice)
     if not _ensure_authenticated():
         return
+    if not st.session_state.get("boot_seen", False):
+        _render_boot_screen()
+        return
     config = _render_sidebar_config()
     st.session_state["theme_mode"] = config["theme_mode"]
-    if config.get("analyze_button"):
-        st.session_state[ANALYSIS_RUNNING_KEY] = True
 
     methodology_slot = st.empty()
     with methodology_slot.container():
-        _render_methodology_entry()
-    ui.product_header()
+        _render_methodology_entry(slot_name="top")
+
     if config["page"] == "首页":
         _render_homepage()
-        return
-    if config["page"] == "跨游戏对比（Beta）":
-        _render_cross_game_beta_page(config)
         return
     if config["page"] == "分析记录":
         _render_analysis_history_page(config)
         return
+    if config["page"] == "工作台":
+        _render_workspace_page(config)
+        return
+
+    ui.brand_hero(**_BRAND_HERO_CONTENT[config["page"]])
+    _render_page_action_bar()
+    config.update(_render_analysis_config(config["page"]))
+    if config.get("analyze_button"):
+        st.session_state[ANALYSIS_RUNNING_KEY] = True
+        methodology_slot.empty()
+        with methodology_slot.container():
+            _render_methodology_entry(slot_name="running", is_running=True)
 
     signature = session_manager.AnalysisSignature.from_config(config)
 
@@ -148,7 +198,6 @@ def main() -> None:
         else:
             if session_manager.config_changed(signature):
                 st.warning("配置已变化，请重新分析以生成当前包名、地区、语言和评论数量对应的报告。")
-            _render_homepage()
         return
 
     if config["mode"] == "单市场分析":
@@ -160,7 +209,7 @@ def main() -> None:
             st.session_state[ANALYSIS_RUNNING_KEY] = False
             methodology_slot.empty()
             with methodology_slot.container():
-                _render_methodology_entry()
+                _render_methodology_entry(slot_name="single_result")
     else:
         session_manager.clear_analysis()
         _render_analysis_running_anchor()
@@ -170,59 +219,39 @@ def main() -> None:
             st.session_state[ANALYSIS_RUNNING_KEY] = False
             methodology_slot.empty()
             with methodology_slot.container():
-                _render_methodology_entry()
+                _render_methodology_entry(slot_name="market_result")
 
 
 def _render_homepage() -> None:
-    features = [
-        ("评论来源接入", "抓取 Google Play 评论，并预留 Steam、App Store、TapTap 扩展。"),
-        ("AI 语义分析", "完成分类、情感识别、中文概括及高频问题聚合。"),
-        ("跨市场洞察", "比较国家与区域玩家反馈，识别本地化差异。"),
-        ("区域市场分析", "按代表国家等量采样，避免单一市场主导结论。"),
-        ("AI 洞察总结", "输出共同优点、主要问题、商业化风险和运营建议。"),
-        ("专业报告导出", "生成可直接汇报的 PPT，并预留更多导出格式。"),
-    ]
-    ui.section_label("CORE CAPABILITY MATRIX")
-    ui.feature_grid(features)
+    with st.container(key="home_page"):
+        copy_col = ui.home_hero()
+        with copy_col:
+            with st.container(key="home_actions"):
+                button_cols = st.columns(3)
+                with button_cols[0]:
+                    st.button("单市场分析", type="primary", use_container_width=True, on_click=_go_to_single_market)
+                with button_cols[1]:
+                    st.button("跨市场分析", use_container_width=True, on_click=_go_to_market_comparison)
+                with button_cols[2]:
+                    with st.container(key="home_workspace_action"):
+                        st.button("打开工作台", use_container_width=True, on_click=_go_to_workspace)
 
-    ui.section_label("ANALYSIS PIPELINE")
-    _render_process_flow(-1)
+        features = [
+            ("评论来源接入", "抓取 Google Play 评论，并预留 Steam、App Store、TapTap 扩展。"),
+            ("AI 语义分析", "完成分类、情感识别、中文概括及高频问题聚合。"),
+            ("跨市场洞察", "比较国家与区域玩家反馈，识别本地化差异。"),
+            ("区域市场分析", "按代表国家等量采样，避免单一市场主导结论。"),
+            ("AI 洞察总结", "输出共同优点、主要问题、商业化风险和运营建议。"),
+            ("专业报告导出", "生成可直接汇报的 PPT，并预留更多导出格式。"),
+        ]
+        ui.section_label("CORE CAPABILITY MATRIX", anchor_id="core-capability-matrix")
+        ui.feature_grid(features)
+
+        ui.section_label("ANALYSIS PIPELINE")
+        _render_process_flow(-1)
 
 
-def _render_cross_game_beta_page(config: dict) -> None:
-    st.markdown("<div id='cross-game-beta'></div>", unsafe_allow_html=True)
-    st.subheader("跨游戏对比（Beta）")
-    st.info("当前版本仅支持比较本次会话中已完成分析的游戏，后续将支持实时多游戏分析。")
-
-    saved_reports = session_manager.get_single_reports()
-    if not saved_reports:
-        st.warning("暂无已保存分析。请先完成至少两个单市场分析。")
-        return
-
-    option_indexes = list(range(len(saved_reports)))
-    selected_indexes = st.multiselect(
-        "已保存分析",
-        options=option_indexes,
-        default=option_indexes[-min(2, len(option_indexes)):],
-        format_func=lambda index: _saved_report_label(saved_reports[index]),
-        help="最多选择 4 个本次会话中已完成的单市场分析结果。",
-    )
-    if len(selected_indexes) > 4:
-        st.warning("跨游戏对比（Beta）最多选择 4 个已保存分析。")
-        return
-    if len(selected_indexes) < 2:
-        st.warning("请选择至少 2 个已保存分析。")
-        return
-
-    if not st.button("生成对比", type="primary"):
-        return
-
-    selected_payloads = [saved_reports[index] for index in selected_indexes]
-    rows = build_cross_game_rows(selected_payloads)
-    if len(rows) < 2:
-        st.warning("所选结果缺少可比较的综合评分数据。")
-        return
-
+def _render_cross_game_comparison_view(rows: list[dict], theme_mode: str) -> None:
     st.markdown("#### 对比指标")
     st.dataframe(
         pd.DataFrame([_localize_cross_game_row(public_row(row)) for row in rows]),
@@ -231,7 +260,7 @@ def _render_cross_game_beta_page(config: dict) -> None:
     )
 
     st.markdown("#### 雷达图")
-    fig = _create_cross_game_radar_chart(rows, config.get("theme_mode", "light"))
+    fig = _create_cross_game_radar_chart(rows, theme_mode)
     st.pyplot(fig, use_container_width=True)
     plt.close(fig)
 
@@ -239,8 +268,168 @@ def _render_cross_game_beta_page(config: dict) -> None:
     _render_text_panel(build_cross_game_summary(rows))
 
 
+PICKER_PLACEHOLDER = "— 请选择 —"
+
+
+def _sync_picker_query_state(session_state, prefix: str, query: str) -> None:
+    """Drop any previously fetched candidates as soon as the search query changes.
+
+    st.cache_data invalidation alone isn't enough here: a user who already ran a
+    search and then edits the query text (without clicking 搜索 again) must not
+    keep seeing the previous query's candidate list.
+    """
+    last_query_key = f"{prefix}_picker_last_query"
+    if session_state.get(last_query_key) != query:
+        session_state[last_query_key] = query
+        session_state.pop(f"{prefix}_picker_candidates_v2", None)
+
+
+def _picker_choice_labels(candidates: list[GameSearchResult]) -> list[str]:
+    """Build selectbox options with the placeholder first (index 0), followed by
+    candidates in relevance order. Callers default the widget to index 1 so the
+    best match is preselected, while the placeholder stays available as an
+    explicit "nothing chosen" option.
+    """
+    return [PICKER_PLACEHOLDER] + [f"{item.title} · {item.developer} · {item.app_id}" for item in candidates]
+
+
+def _render_game_picker(page: str) -> str:
+    prefix = "single" if page == "单市场分析" else "market"
+    app_id_key = f"{prefix}_picker_app_id"
+
+    if st.session_state.get(app_id_key):
+        app_id = st.session_state[app_id_key]
+        st.caption(f"已选择包名：{app_id}")
+        if st.button("重新选择游戏", key=f"{prefix}_picker_reset"):
+            st.session_state.pop(app_id_key, None)
+            st.session_state.pop(f"{prefix}_picker_candidates_v2", None)
+            st.rerun()
+        try:
+            listing = _cached_fetch_store_listing(app_id, DEFAULT_COUNTRY)
+        except Exception:
+            st.caption("暂时无法获取商店信息，可继续分析。")
+        else:
+            _render_compact_store_card(listing)
+        return app_id
+
+    input_mode = st.radio(
+        "输入方式",
+        ["按名称搜索", "输入链接或包名"],
+        horizontal=True,
+        key=f"{prefix}_picker_mode",
+    )
+    if input_mode == "按名称搜索":
+        query = st.text_input("游戏名称", key=f"{prefix}_picker_query", placeholder="例如：原神")
+
+        _sync_picker_query_state(st.session_state, prefix, query)
+
+        if st.button("搜索", key=f"{prefix}_picker_search"):
+            try:
+                candidates = _cached_search_games(query, DEFAULT_COUNTRY, DEFAULT_LANGUAGE)
+            except ValueError as exc:
+                st.warning(str(exc))
+                st.session_state[f"{prefix}_picker_candidates_v2"] = []
+            except Exception:
+                st.error("搜索失败，请稍后重试，或改用包名/链接输入。")
+                st.session_state[f"{prefix}_picker_candidates_v2"] = []
+            else:
+                st.session_state[f"{prefix}_picker_candidates_v2"] = candidates
+                if not candidates:
+                    st.warning("未找到准确匹配，请尝试输入英文名或 Google Play 包名。")
+
+        candidates: list[GameSearchResult] = st.session_state.get(f"{prefix}_picker_candidates_v2", [])
+        if candidates:
+            card_slot = st.container()
+
+            # Option values are appIds (stable and unique), never the formatted label
+            # text -- titles can collide across candidates, so resolving the selected
+            # candidate by string-matching the label would be fragile. The placeholder
+            # uses "" since a real appId is never empty.
+            option_values = [PICKER_PLACEHOLDER] + [item.app_id for item in candidates]
+            label_by_value = dict(zip(option_values, _picker_choice_labels(candidates)))
+            choice_key = f"{prefix}_picker_choice_{abs(hash(tuple(item.app_id for item in candidates)))}"
+            picked_value = st.selectbox(
+                "选择游戏（请核对包名后确认）",
+                options=option_values,
+                format_func=lambda value: label_by_value[value],
+                index=1,
+                key=choice_key,
+            )
+
+            selected_game = next((item for item in candidates if item.app_id == picked_value), None)
+
+            with card_slot:
+                st.caption("当前选择")
+                if selected_game is None:
+                    st.caption("请从候选列表中选择一个游戏。")
+                else:
+                    score_text = f"{selected_game.score:.1f}" if selected_game.score is not None else "暂无"
+                    st.markdown(f"**{selected_game.title}**")
+                    st.caption(f"{selected_game.developer or '—'} ｜ 评分：{score_text}")
+                    st.caption(selected_game.app_id)
+
+            if selected_game is not None:
+                if st.button("确认选择", key=f"{prefix}_picker_confirm"):
+                    st.session_state[app_id_key] = selected_game.app_id
+                    st.rerun()
+    else:
+        raw = st.text_input(
+            "Google Play 链接或包名",
+            key=f"{prefix}_picker_raw",
+            placeholder="com.example.game",
+        )
+        if st.button("确认", key=f"{prefix}_picker_confirm_direct"):
+            try:
+                resolved = extract_package_name(raw)
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state[app_id_key] = resolved
+                st.rerun()
+
+    return ""
+
+
+def _render_sidebar_step_indicator(step1_label: str, step2_label: str, step1_done: bool) -> None:
+    done_style = "background:var(--gp-surface-alt); border-color:var(--gp-primary); color:var(--gp-accent-text);"
+    active_style = "background:var(--gp-primary); border-color:var(--gp-primary); color:#111111;"
+    idle_style = "background:var(--gp-surface); border-color:var(--gp-border); color:var(--gp-muted);"
+    step1_style = done_style if step1_done else active_style
+    step2_style = active_style if step1_done else idle_style
+    chip_css = "flex:1; text-align:center; padding:6px 8px; border-radius:4px; border:1px solid; font-size:11px; font-weight:700;"
+    st.markdown(
+        f"""
+        <div style="display:flex; gap:6px; margin:2px 0 12px;">
+            <span style="{chip_css} {step1_style}">① {step1_label}</span>
+            <span style="{chip_css} {step2_style}">② {step2_label}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_compact_store_card(listing: StoreListing) -> None:
+    score_text = f"{listing.score:.2f}" if listing.score is not None else "—"
+    st.caption(f"**{listing.title or listing.app_id}** ｜ {listing.developer or '—'} ｜ 评分 {score_text}")
+    st.caption(f"公开安装量：{listing.installs or '—'}（Google Play 公开安装量，非国家/地区下载量，仅供整体规模参考）")
+    st.caption(f"版本 {listing.version or '—'} ｜ 更新于 {listing.last_updated_on or '—'}")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_search_games(
+    query: str, country: str, lang: str, cache_version: str = SEARCH_CACHE_VERSION
+) -> list[GameSearchResult]:
+    return search_games(query, country=country, lang=lang)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_fetch_store_listing(app_id: str, country: str) -> StoreListing:
+    return fetch_store_listing(app_id, country=country)
+
+
 def _render_analysis_history_page(config: dict) -> None:
-    st.subheader("分析记录")
+    st.button("← 返回首页", key="history_back_home", on_click=_return_to_homepage)
+    st.title("分析记录")
     records = session_manager.get_single_reports()
     if not records:
         st.info("暂无分析记录。完成一次单市场分析后，报告会自动保存在这里。")
@@ -281,14 +470,244 @@ def _render_analysis_history_page(config: dict) -> None:
         _render_saved_analysis(selected, config, show_progress=True, show_context=True)
 
 
-def _saved_report_label(payload: dict) -> str:
+def _render_save_to_project_widget(payload: dict) -> None:
+    key_prefix = f"save_to_project_{payload.get('type')}_{payload.get('package_name')}"
+    with st.expander("保存到项目", expanded=False):
+        projects = workspace_store.list_projects()
+        options = ["+ 新建项目"] + [project["name"] for project in projects]
+        choice = st.selectbox("选择项目", options, key=f"{key_prefix}_choice")
+        new_project_name = ""
+        if choice == "+ 新建项目":
+            new_project_name = st.text_input("新项目名称", key=f"{key_prefix}_new_name")
+        if st.button("保存到项目", key=f"{key_prefix}_submit"):
+            if choice == "+ 新建项目":
+                project_id = workspace_store.create_project(new_project_name)
+                if not project_id:
+                    st.error("项目名称不能为空，请填写后重试。")
+                    return
+            else:
+                project = next((p for p in projects if p["name"] == choice), None)
+                project_id = project["id"] if project else None
+            if not project_id:
+                st.error("未找到目标项目，保存失败。")
+                return
+            outcome = workspace_store.save_analysis_to_project(project_id, payload)
+            if outcome is None:
+                st.error("保存失败，请稍后重试。")
+            elif outcome["created"]:
+                st.success("已保存到项目。")
+            else:
+                st.info("检测到相同分析结果，已更新项目中的已有记录。")
+
+
+def _open_saved_analysis_record(record_id: str) -> None:
+    st.session_state["workspace_view_record_id"] = record_id
+
+
+def _fill_workspace_task(text: str) -> None:
+    st.session_state["workspace_task_input"] = text
+    st.session_state["workspace_task_draft"] = text
+
+
+def _sync_workspace_draft() -> None:
+    st.session_state["workspace_task_draft"] = st.session_state.get("workspace_task_input", "")
+
+
+def _auto_project_name(task_text: str, max_len: int = 18) -> str:
+    cleaned = " ".join(task_text.split())
+    return cleaned if len(cleaned) <= max_len else cleaned[:max_len].rstrip() + "…"
+
+
+def _create_workspace_project_from_task() -> None:
+    task_text = (st.session_state.get("workspace_task_draft") or "").strip()
+    if not task_text:
+        st.session_state["workspace_create_error"] = "请先输入研究任务。"
+        return
+    custom_name = (st.session_state.get("workspace_new_project_name") or "").strip()
+    notes = st.session_state.get("workspace_new_project_notes") or ""
+    name = custom_name or _auto_project_name(task_text)
+    project_id = workspace_store.create_project(name, research_goal=task_text, notes=notes)
+    if project_id:
+        st.session_state["active_workspace_project"] = project_id
+        st.session_state["workspace_task_draft"] = ""
+        st.session_state["workspace_task_input"] = ""
+        st.session_state["workspace_new_project_name"] = ""
+        st.session_state["workspace_new_project_notes"] = ""
+        st.session_state["workspace_create_success"] = True
+        st.session_state.pop("workspace_create_error", None)
+    else:
+        st.session_state["workspace_create_error"] = "请先输入研究任务。"
+
+
+def _workspace_record_label(record: dict) -> str:
     parts = [
-        str(payload.get("package_name") or "Unknown Game"),
-        str(payload.get("scope") or ""),
-        str(payload.get("time_display") or payload.get("time_mode") or ""),
-        str(payload.get("analysis_timestamp") or ""),
+        str(record.get("game_name") or record.get("package_name") or "Unknown Game"),
+        str(record.get("market") or ""),
+        str(record.get("created_at") or ""),
     ]
     return " · ".join(part for part in parts if part)
+
+
+def _render_workspace_page(config: dict) -> None:
+    st.button("← 返回首页", key="workspace_back_home", on_click=_return_to_homepage)
+    st.title("工作台")
+    st.write("描述你的研究目标，GamePulse AI 将帮助你拆解竞品发现、市场评价比较与发行判断步骤。")
+    st.caption(
+        "工作台数据仅保存在当前浏览器会话内，关闭标签页或刷新页面后会清空，不会长期保留——"
+        "如果想长期保存某个分析结果，请使用导出功能（PPT）另外存档。"
+    )
+
+    if "workspace_task_draft" not in st.session_state:
+        st.session_state["workspace_task_draft"] = ""
+    if "workspace_task_input" not in st.session_state:
+        st.session_state["workspace_task_input"] = st.session_state["workspace_task_draft"]
+
+    st.text_area(
+        "研究任务",
+        key="workspace_task_input",
+        on_change=_sync_workspace_draft,
+        placeholder="例如：为游戏 A 寻找玩法相近的竞品",
+    )
+    st.button("创建研究项目", key="workspace_create_project_btn", type="primary", on_click=_create_workspace_project_from_task)
+
+    if st.session_state.pop("workspace_create_success", False):
+        st.success("研究项目已创建。")
+    elif st.session_state.get("workspace_create_error"):
+        st.error(st.session_state.pop("workspace_create_error"))
+    elif (st.session_state.get("workspace_task_draft") or "").strip():
+        st.caption("尚未创建为项目，点击“创建研究项目”后才会保存到项目列表。")
+
+    st.caption("示例任务（点击可直接填入上方输入框）")
+    example_tasks = [
+        "为游戏 A 寻找玩法相近的竞品",
+        "比较这些竞品在美国、日本和韩国的玩家评价",
+        "根据评价差异判断游戏 A 更适合优先进入哪个市场",
+    ]
+    example_cols = st.columns(3)
+    for index, (col, example_text) in enumerate(zip(example_cols, example_tasks)):
+        col.button(
+            example_text,
+            key=f"workspace_example_{index}",
+            use_container_width=True,
+            on_click=_fill_workspace_task,
+            args=(example_text,),
+        )
+
+    with st.expander("这个研究任务目前能做到什么？", expanded=True):
+        st.markdown(
+            "- **现在就能做**：创建/管理项目、把已完成的单市场分析保存进项目、对比项目内 2-4 条单市场分析（雷达图+表格）。\n"
+            "- **需要你手动选择参数**：实际抓取评论、选择国家/语言/时间范围仍需前往「单市场分析」/「跨市场比较」页面手动设置后运行——"
+            "工作台目前只帮你记录研究目标，不会自动执行。\n"
+            "- **尚未开发**：根据这里填写的自然语言任务自动拆解并串联执行「竞品发现 → 评论分析 → 市场选择」的全自动流程。"
+        )
+
+    st.divider()
+
+    with st.expander("项目名称与备注（可选）", expanded=False):
+        st.text_input("项目名称（留空自动根据研究任务生成）", key="workspace_new_project_name")
+        st.text_area("备注", key="workspace_new_project_notes")
+
+    st.divider()
+    st.markdown("**核心功能**")
+    st.caption("工作台目前只帮你记录研究目标，实际抓取评论、生成分析需要前往下面两个页面手动运行。")
+    core_cols = st.columns(2)
+    if core_cols[0].button("去单市场分析", key="workspace_core_single", use_container_width=True):
+        st.session_state["active_page"] = "单市场分析"
+        st.rerun()
+    if core_cols[1].button("去跨市场比较", key="workspace_core_market", use_container_width=True):
+        st.session_state["active_page"] = "跨市场分析"
+        st.rerun()
+
+    projects = workspace_store.list_projects()
+    if not projects:
+        st.info("暂无项目，先在上方输入研究任务并点击“创建研究项目”。")
+        return
+
+    for project in projects:
+        project_id = project["id"]
+        is_active_project = project_id == st.session_state.get("active_workspace_project")
+        project_label = project["name"] + ("（当前项目）" if is_active_project else "")
+        with st.expander(project_label, expanded=is_active_project):
+            edit_name = st.text_input("项目名称", value=project["name"], key=f"workspace_edit_name_{project_id}")
+            edit_goal = st.text_input(
+                "研究目标", value=project.get("research_goal") or "", key=f"workspace_edit_goal_{project_id}"
+            )
+            edit_notes = st.text_area(
+                "备注", value=project.get("notes") or "", key=f"workspace_edit_notes_{project_id}"
+            )
+            if st.button("保存修改", key=f"workspace_save_project_{project_id}"):
+                if workspace_store.update_project(project_id, name=edit_name, research_goal=edit_goal, notes=edit_notes):
+                    st.success("项目信息已更新。")
+                    st.rerun()
+                else:
+                    st.error("更新失败，请稍后重试。")
+
+            st.divider()
+            st.markdown("**已保存的分析结果**")
+            saved = workspace_store.list_saved_analyses(project_id)
+            if not saved:
+                st.caption("该项目暂无已保存的分析结果。")
+            for record in saved:
+                record_id = record["id"]
+                cols = st.columns([3, 1, 1, 1, 1])
+                cols[0].write(f"{record.get('game_name') or record.get('package_name') or 'Unknown'} · {record.get('market') or ''}")
+                score_value = record.get("overall_score")
+                cols[1].metric("评分", f"{float(score_value):.1f}" if score_value is not None else "--")
+                cols[2].caption(record.get("grade") or "--")
+                if cols[3].button("查看报告", key=f"workspace_view_{record_id}"):
+                    _open_saved_analysis_record(record_id)
+                confirm_delete_record = cols[4].checkbox("确认删除", key=f"workspace_confirm_del_record_{record_id}")
+                if confirm_delete_record and cols[4].button("删除", key=f"workspace_del_record_{record_id}"):
+                    workspace_store.delete_saved_analysis(record_id)
+                    st.success("已删除该分析结果。")
+                    st.rerun()
+
+            single_records = [r for r in saved if r.get("analysis_type") == "single"]
+            market_records = [r for r in saved if r.get("analysis_type") != "single"]
+            st.divider()
+            st.markdown("**项目内对比**")
+            if market_records:
+                st.caption("跨市场分析结果暂不支持加入对比，以下仅列出可参与对比的单市场分析。")
+            if len(single_records) < 2:
+                st.caption("至少需要 2 条单市场分析结果才能生成对比。")
+            else:
+                record_by_id = {record["id"]: record for record in single_records}
+                compare_ids = st.multiselect(
+                    "选择要对比的分析结果（2-4 条）",
+                    options=list(record_by_id.keys()),
+                    format_func=lambda rid: _workspace_record_label(record_by_id[rid]),
+                    key=f"workspace_compare_select_{project_id}",
+                )
+                if len(compare_ids) > 4:
+                    st.warning("最多选择 4 条分析结果进行对比。")
+                elif len(compare_ids) >= 2 and st.button("生成对比", key=f"workspace_compare_btn_{project_id}"):
+                    compare_payloads = [
+                        payload
+                        for payload in (workspace_store.get_saved_analysis(rid) for rid in compare_ids)
+                        if payload
+                    ]
+                    rows = build_cross_game_rows(compare_payloads)
+                    if len(rows) < 2:
+                        st.warning("所选结果缺少可比较的综合评分数据。")
+                    else:
+                        _render_cross_game_comparison_view(rows, config.get("theme_mode", "light"))
+
+            st.divider()
+            st.markdown("**删除整个项目**")
+            confirm_1 = st.checkbox("我确认要删除该项目及其全部已保存分析结果", key=f"workspace_confirm1_{project_id}")
+            confirm_2 = st.checkbox("我已知悉此操作不可恢复", key=f"workspace_confirm2_{project_id}")
+            if confirm_1 and confirm_2 and st.button("删除项目", key=f"workspace_delete_project_{project_id}"):
+                workspace_store.delete_project(project_id)
+                st.success("已删除该项目。")
+                st.rerun()
+
+    selected_id = st.session_state.get("workspace_view_record_id")
+    if selected_id:
+        selected = workspace_store.get_saved_analysis(selected_id)
+        if selected:
+            st.divider()
+            st.subheader("已保存报告")
+            _render_saved_analysis(selected, config, show_progress=True, show_context=True)
 
 
 def _history_record_label(payload: dict) -> str:
@@ -404,13 +823,89 @@ def _render_analysis_running_anchor() -> None:
     )
 
 
-def _sync_active_nav_page() -> None:
-    st.session_state["active_page"] = st.session_state.get("nav_page", "首页")
+def _show_boot_screen() -> None:
+    st.session_state["boot_seen"] = False
+    st.session_state["boot_visit_id"] = st.session_state.get("boot_visit_id", 0) + 1
 
 
-def _open_analysis_history_page() -> None:
-    st.session_state["active_page"] = "分析记录"
-    st.session_state["nav_page"] = "首页"
+def _go_to_workspace() -> None:
+    st.session_state["boot_seen"] = True
+    st.session_state["active_page"] = "工作台"
+
+
+def _go_to_single_market() -> None:
+    st.session_state["boot_seen"] = True
+    st.session_state["active_page"] = "单市场分析"
+
+
+def _go_to_market_comparison() -> None:
+    st.session_state["boot_seen"] = True
+    st.session_state["active_page"] = "跨市场分析"
+
+
+def _return_to_homepage() -> None:
+    st.session_state["active_page"] = "首页"
+
+
+def _go_to_homepage_from_boot() -> None:
+    st.session_state["boot_seen"] = True
+    st.session_state["active_page"] = "首页"
+
+
+def _render_page_action_bar() -> None:
+    with st.container(key="page_action_bar"):
+        action_cols = st.columns(2)
+        with action_cols[0]:
+            st.button("← 返回首页", use_container_width=True, on_click=_return_to_homepage)
+        with action_cols[1]:
+            st.button("打开工作台", use_container_width=True, on_click=_go_to_workspace)
+
+
+def _render_boot_screen() -> None:
+    visit_id = st.session_state.get("boot_visit_id", 0)
+    with st.container(key="boot_screen"):
+        ui.boot_background_layer()
+        ui.boot_hero()
+        ui.boot_panels(
+            [
+                ("01", "单市场分析", "SINGLE MARKET"),
+                ("02", "跨市场比较", "MULTI MARKET"),
+                ("03", "AI 研究工作台", "AI WORKSPACE"),
+            ]
+        )
+        with st.container(key="boot_actions"):
+            button_cols = st.columns([2, 1, 1, 2])
+            with button_cols[1]:
+                st.button("进入首页", type="primary", use_container_width=True, on_click=_go_to_homepage_from_boot)
+            with button_cols[2]:
+                with st.container(key="boot_secondary_action"):
+                    st.button("开始分析", use_container_width=True, on_click=_go_to_single_market)
+    components.html(
+        f"""
+        <script>
+          const visitId = "{visit_id}";
+          const storageKey = "gp_boot_last_played_id";
+          const applySkip = () => {{
+            const doc = window.parent.document;
+            const el = doc.querySelector(".st-key-boot_screen");
+            if (!el) return false;
+            const lastPlayed = window.parent.sessionStorage.getItem(storageKey);
+            if (lastPlayed === visitId) {{
+              el.classList.add("gp-anim-skip");
+            }} else {{
+              el.classList.remove("gp-anim-skip");
+              window.parent.sessionStorage.setItem(storageKey, visitId);
+            }}
+            return true;
+          }};
+          if (!applySkip()) {{
+            setTimeout(applySkip, 30);
+            setTimeout(applySkip, 120);
+          }}
+        </script>
+        """,
+        height=0,
+    )
 
 
 def _render_sidebar_config() -> dict:
@@ -419,126 +914,154 @@ def _render_sidebar_config() -> dict:
         theme_choice = st.selectbox("主题", ["跟随系统", "浅色", "深色"], key="theme_choice")
         theme_mode = theme.resolve_theme_mode(theme_choice)
 
-        ui.section_title("页面导航", "导航")
-        page = st.radio(
-            "页面",
-            ["首页", "单市场分析", "跨市场分析", "跨游戏对比（Beta）"],
-            horizontal=False,
-            label_visibility="collapsed",
-            key="nav_page",
-            on_change=_sync_active_nav_page,
-        )
-        page = st.session_state.get("active_page", page)
+        ui.section_title("功能导航", "导航")
+        current_page = st.session_state.get("active_page", "首页")
+        for slug, page_value, label in NAV_ITEMS:
+            is_active = current_page == page_value
+            with st.container(key=f"navitem_{slug}_{'active' if is_active else 'idle'}"):
+                if st.button(label, key=f"navbtn_{slug}", use_container_width=True):
+                    st.session_state["active_page"] = page_value
+                    current_page = page_value
+        page = st.session_state.get("active_page", "首页")
         st.divider()
-        ui.section_title("分析记录", "记录")
-        st.button("查看分析记录", use_container_width=True, on_click=_open_analysis_history_page)
-        page = st.session_state.get("active_page", page)
-
-        if page in {"首页", "分析记录", "跨游戏对比（Beta）"}:
-            return {
-                "page": page,
-                "theme_choice": theme_choice,
-                "theme_mode": theme_mode,
-                "analyze_button": False,
-            }
-
-        ui.section_title("评论来源", "数据来源")
-        platform = st.selectbox("游戏平台", ["Google Play"], help="预留 Steam、App Store、TapTap 等评论来源。")
-        raw_input = st.text_input("评论来源链接或包名", placeholder="com.example.game")
-
-        st.divider()
-        ui.section_title("分析模式", "分析模式")
-        mode = page
-        st.caption(mode)
-
-        st.divider()
-        ui.section_title("市场范围", "分析范围")
-        if mode == "单市场分析":
-            analysis_level = "国家/地区对比"
-            country = _country_selectbox(DEFAULT_COUNTRY)
-            selected_items = [country]
-            market_data_source = "实时抓取分析"
-            selected_record_ids: list[str] = []
-        else:
-            market_data_source = st.radio(
-                "跨市场数据来源",
-                ["实时抓取分析", "已保存分析记录"],
-                help="选择已保存分析记录时，将直接读取分析记录，不重新抓取或调用 Claude。",
-            )
-            analysis_level = st.radio("分析层级", ["国家/地区对比", "区域对比"], horizontal=False)
-            if analysis_level == "国家/地区对比":
-                selected_items = st.multiselect(
-                    "选择国家/地区（2-5 个）",
-                    options=list(COUNTRY_OPTIONS),
-                    default=["us", "jp", "kr"],
-                    format_func=_format_country,
-                )
-            else:
-                selected_items = st.multiselect(
-                    "选择区域（自动覆盖代表国家，2-4 个）",
-                    options=list(COUNTRY_GROUPS),
-                    default=["东亚", "北美"],
-                )
-                st.caption("区域模式会自动抓取区域代表国家，用户无需逐个选择国家。")
-            country = selected_items[0] if selected_items else DEFAULT_COUNTRY
-            records = session_manager.get_single_reports()
-            selected_record_ids = []
-            if market_data_source == "已保存分析记录":
-                record_options = [str(record.get("record_id")) for record in records]
-                selected_record_ids = st.multiselect(
-                    "选择已保存分析记录（2-5 条）",
-                    options=record_options,
-                    default=record_options[: min(2, len(record_options))],
-                    format_func=lambda record_id: _history_record_label(next(record for record in records if str(record.get("record_id")) == record_id)),
-                )
-
-        st.divider()
-        ui.section_title("语言策略", "评论来源")
-        if mode == "单市场分析":
-            comment_source = "指定语言评论（高级）"
-            specified_language = _language_selectbox(DEFAULT_LANGUAGE)
-            language = specified_language
-            keep_other_languages = False
-        else:
-            comment_source, specified_language, keep_other_languages = _comment_source_controls()
-            language = specified_language or DEFAULT_LANGUAGE
-        language_filter_mode = LANGUAGE_FILTER_NONE if language == UNRESTRICTED_LANGUAGE or keep_other_languages else LANGUAGE_FILTER_STRICT
-
-        st.divider()
-        ui.section_title("分析参数", "分析参数")
-        if mode == "单市场分析":
-            st.caption("评论数量")
-            review_count = st.number_input("评论数量", min_value=20, max_value=1000, value=DEFAULT_REVIEW_COUNT, step=20)
-            st.caption("Claude 每批处理的评论数量")
-            batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
-            button_label = "开始分析"
-        elif analysis_level == "区域对比":
-            st.caption("区域模式下每个代表国家抓取相同数量")
-            review_count = st.number_input("每个国家评论数量", min_value=20, max_value=100, value=30, step=10)
-            st.caption("Claude 每批处理的评论数量")
-            batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
-            button_label = "生成区域洞察"
-        else:
-            st.caption("每个市场抓取相同数量")
-            review_count = st.number_input("每个市场评论数量", min_value=20, max_value=1000, value=50, step=20)
-            st.caption("Claude 每批处理的评论数量")
-            batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
-            button_label = "生成跨市场洞察"
-
-        time_scope = _time_scope_controls()
-
-        analyze_button = st.button(
-            button_label,
-            type="primary",
-            use_container_width=True,
-            disabled=not time_scope["time_valid"],
-        )
+        st.button("返回开机页", use_container_width=True, on_click=_show_boot_screen)
+        ui.sidebar_footer()
 
     return {
         "page": page,
-        "platform": platform,
         "theme_choice": theme_choice,
         "theme_mode": theme_mode,
+        "analyze_button": False,
+    }
+
+
+def _render_analysis_config(page: str) -> dict:
+    """Analysis-parameter form for 单市场分析/跨市场分析, rendered in the main content
+    area. Moved out of the sidebar; every widget below is unchanged from its prior
+    sidebar rendering (same widgets, same order, same lack of explicit keys), so
+    existing session_state/widget behavior is preserved.
+    """
+    ui.section_title("PART 1", "选择数据来源")
+    platform = st.selectbox("游戏平台", ["Google Play"], help="预留 Steam、App Store、TapTap 等评论来源。")
+    mode = page
+
+    ui.section_title("PART 2", "查找游戏")
+    if mode == "单市场分析":
+        market_data_source = "实时抓取分析"
+        raw_input = _render_game_picker(page)
+    else:
+        market_data_source = st.radio(
+            "跨市场数据来源",
+            ["实时抓取分析", "已保存分析记录"],
+            help="选择已保存分析记录时，将直接读取分析记录，不重新抓取或调用 Claude。",
+        )
+        raw_input = _render_game_picker(page) if market_data_source == "实时抓取分析" else ""
+
+    step1_done = bool(raw_input) or (mode != "单市场分析" and market_data_source == "已保存分析记录")
+
+    st.divider()
+    _render_sidebar_step_indicator(
+        "选择游戏" if mode == "单市场分析" else "游戏/数据来源",
+        "设置参数并分析",
+        step1_done,
+    )
+
+    if not step1_done:
+        st.caption("请先选择游戏或数据来源，完成后将展开分析范围、语言与参数设置。")
+        return {
+            "platform": platform,
+            "mode": mode,
+            "raw_input": raw_input,
+            "market_data_source": market_data_source,
+            "analyze_button": False,
+        }
+
+    st.divider()
+    ui.section_title("PART 3", "设置分析参数")
+    ui.section_title("分析模式", "分析模式")
+    st.caption(mode)
+
+    st.divider()
+    ui.section_title("市场范围", "分析范围")
+    if mode == "单市场分析":
+        analysis_level = "国家/地区对比"
+        country = _country_selectbox(DEFAULT_COUNTRY)
+        selected_items = [country]
+        selected_record_ids: list[str] = []
+    else:
+        analysis_level = st.radio("分析层级", ["国家/地区对比", "区域对比"], horizontal=False)
+        if analysis_level == "国家/地区对比":
+            selected_items = st.multiselect(
+                "选择国家/地区（2-5 个）",
+                options=list(COUNTRY_OPTIONS),
+                default=["us", "jp", "kr"],
+                format_func=_format_country,
+            )
+        else:
+            selected_items = st.multiselect(
+                "选择区域（自动覆盖代表国家，2-4 个）",
+                options=list(COUNTRY_GROUPS),
+                default=["东亚", "北美"],
+            )
+            st.caption("区域模式会自动抓取区域代表国家，用户无需逐个选择国家。")
+        country = selected_items[0] if selected_items else DEFAULT_COUNTRY
+        records = session_manager.get_single_reports()
+        selected_record_ids = []
+        if market_data_source == "已保存分析记录":
+            record_options = [str(record.get("record_id")) for record in records]
+            selected_record_ids = st.multiselect(
+                "选择已保存分析记录（2-5 条）",
+                options=record_options,
+                default=record_options[: min(2, len(record_options))],
+                format_func=lambda record_id: _history_record_label(next(record for record in records if str(record.get("record_id")) == record_id)),
+            )
+
+    st.divider()
+    ui.section_title("语言策略", "评论来源")
+    if mode == "单市场分析":
+        comment_source = "指定语言评论（高级）"
+        specified_language = _language_selectbox(DEFAULT_LANGUAGE)
+        language = specified_language
+        keep_other_languages = False
+    else:
+        comment_source, specified_language, keep_other_languages = _comment_source_controls()
+        language = specified_language or DEFAULT_LANGUAGE
+    language_filter_mode = LANGUAGE_FILTER_NONE if language == UNRESTRICTED_LANGUAGE or keep_other_languages else LANGUAGE_FILTER_STRICT
+
+    st.divider()
+    ui.section_title("分析参数", "分析参数")
+    if mode == "单市场分析":
+        st.caption("评论数量")
+        review_count = st.number_input("评论数量", min_value=20, max_value=1000, value=DEFAULT_REVIEW_COUNT, step=20)
+        st.caption("Claude 每批处理的评论数量")
+        batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
+        button_label = "开始分析"
+    elif analysis_level == "区域对比":
+        st.caption("区域模式下每个代表国家抓取相同数量")
+        review_count = st.number_input("每个国家评论数量", min_value=20, max_value=100, value=30, step=10)
+        st.caption("Claude 每批处理的评论数量")
+        batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
+        button_label = "生成区域洞察"
+    else:
+        st.caption("每个市场抓取相同数量")
+        review_count = st.number_input("每个市场评论数量", min_value=20, max_value=1000, value=50, step=20)
+        st.caption("Claude 每批处理的评论数量")
+        batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
+        button_label = "生成跨市场洞察"
+
+    time_scope = _time_scope_controls()
+
+    st.divider()
+    ui.section_title("PART 4", "开始分析")
+    analyze_button = st.button(
+        button_label,
+        type="primary",
+        use_container_width=True,
+        disabled=not time_scope["time_valid"],
+    )
+
+    return {
+        "platform": platform,
         "raw_input": raw_input,
         "mode": mode,
         "analysis_level": analysis_level,
@@ -1521,6 +2044,7 @@ def _render_result(payload: dict, bar_chart_path: Path, pie_chart_path: Path) ->
         _render_representative_reviews_tabs(result)
 
     _render_export_center(payload, "game_review_report.pptx")
+    _render_save_to_project_widget(payload)
 
 
 def _merge_fresh_evaluation(stored_report: dict, fresh_report: dict) -> dict:
@@ -2198,6 +2722,7 @@ def _render_market_comparison_saved(payload: dict, config: dict) -> None:
                     st.dataframe(pd.DataFrame(detail_rows), use_container_width=True)
 
         _render_export_center(payload, "market_comparison_report.pptx")
+        _render_save_to_project_widget(payload)
 
 
 def _create_market_charts_for_payload(payload: dict, temp_path: Path, theme_mode: str) -> list[Path]:
@@ -2603,11 +3128,14 @@ def _render_representative_reviews_tabs(result) -> None:
         _render_review_cards(result.classified_reviews[:100], show_negative_fields=True)
 
 
-def _render_methodology_entry() -> None:
+def _render_methodology_entry(
+    *,
+    slot_name: str,
+    is_running: bool = False,
+) -> None:
     left, right = st.columns([1, 0.22])
-    is_running = bool(st.session_state.get(ANALYSIS_RUNNING_KEY, False))
     with right:
-        button_key = "methodology_dialog_button_running" if is_running else "methodology_dialog_button"
+        button_key = f"methodology_dialog_button__{slot_name}"
         if st.button("📖 分析方法说明", key=button_key, use_container_width=True, disabled=is_running):
             _render_methodology_dialog()
         if is_running:

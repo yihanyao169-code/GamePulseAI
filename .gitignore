@@ -9,3 +9,18 @@ tmp/
 venv/
 .venv/
 .streamlit-home/
+
+# Local runtime logs
+*.log
+
+# Local verification output
+verify_shots/
+
+# Legacy local workspace database
+.streamlit/workspace.db
+
+# Local editor configuration
+.vscode/
+
+# Local Claude task state
+.claude/scheduled_tasks.lock

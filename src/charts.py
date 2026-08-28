@@ -151,7 +151,7 @@ def create_pie_chart(category_counts: dict[str, int], output_path: Path, theme_m
             pctdistance=0.68,
             colors=colors,
             textprops={"fontsize": 12, "fontweight": "bold"},
-            wedgeprops={"edgecolor": "#FFFFFF", "linewidth": 1.2},
+            wedgeprops={"edgecolor": theme.GP_SURFACE, "linewidth": 1.2},
             radius=0.82,
         )
         for text, color in zip(autotexts, colors):
@@ -180,7 +180,7 @@ def _contrast_text_color(hex_color: str) -> str:
     value = hex_color.lstrip("#")
     r, g, b = (int(value[index:index + 2], 16) for index in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    return "#111111" if luminance > 0.58 else "#FFFFFF"
+    return theme.GP_TEXT if luminance > 0.58 else theme.GP_SURFACE
 
 
 def create_market_bar_chart(

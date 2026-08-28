@@ -2,5 +2,23 @@ services:
   - type: web
     name: gamepulse-ai
     runtime: python
+    region: singapore
+    plan: free
     buildCommand: apt-get update && apt-get install -y fonts-noto-cjk && pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT
+    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_BASE_URL
+        sync: false
+      - key: CLAUDE_MODEL
+        sync: false
+      - key: CLAUDE_CLASSIFY_MODEL
+        sync: false
+      - key: CLAUDE_SUMMARY_MODEL
+        sync: false
+      - key: CLAUDE_MAX_WORKERS
+        value: "3"
+      - key: DEBUG_MODE
+        value: "false"
