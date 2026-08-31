@@ -10,15 +10,7 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: ANTHROPIC_BASE_URL
-        sync: false
-      - key: CLAUDE_MODEL
-        sync: false
-      - key: CLAUDE_CLASSIFY_MODEL
-        sync: false
-      - key: CLAUDE_SUMMARY_MODEL
-        sync: false
       - key: CLAUDE_MAX_WORKERS
-        value: "3"
+        value: "2"
       - key: DEBUG_MODE
         value: "false"
