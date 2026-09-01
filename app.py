@@ -1033,6 +1033,7 @@ def _render_analysis_config(page: str) -> dict:
     if mode == "单市场分析":
         st.caption("评论数量")
         review_count = st.number_input("评论数量", min_value=20, max_value=1000, value=DEFAULT_REVIEW_COUNT, step=20)
+        st.caption("默认 50 条可更快生成初步结论；增加样本量可提高结果稳定性，但分析时间和 API 消耗也会增加。")
         st.caption("Claude 每批处理的评论数量")
         batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
         button_label = "开始分析"
@@ -1045,6 +1046,7 @@ def _render_analysis_config(page: str) -> dict:
     else:
         st.caption("每个市场抓取相同数量")
         review_count = st.number_input("每个市场评论数量", min_value=20, max_value=1000, value=50, step=20)
+        st.caption("默认 50 条可更快生成初步结论；增加样本量可提高结果稳定性，但分析时间和 API 消耗也会增加。")
         st.caption("Claude 每批处理的评论数量")
         batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
         button_label = "生成跨市场洞察"
