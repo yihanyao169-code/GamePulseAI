@@ -119,6 +119,7 @@ LOCAL_LANGUAGE_BY_COUNTRY = {code: config["default_language"] for code, config i
 MIN_SCORABLE_REVIEWS = 10
 
 ANALYSIS_RUNNING_KEY = "analysis_running"
+RETRY_ANALYSIS_KEY = "retry_analysis_requested"
 
 NAV_ITEMS = [
     ("home", "首页", "首页"),
@@ -178,6 +179,8 @@ def main() -> None:
     ui.brand_hero(**_BRAND_HERO_CONTENT[config["page"]])
     _render_page_action_bar()
     config.update(_render_analysis_config(config["page"]))
+    if st.session_state.pop(RETRY_ANALYSIS_KEY, False):
+        config["analyze_button"] = True
     if config.get("analyze_button"):
         st.session_state[ANALYSIS_RUNNING_KEY] = True
         methodology_slot.empty()
@@ -196,7 +199,13 @@ def main() -> None:
                 st.warning("配置已变化。当前仍显示上一次已完成报告；如需使用新配置，请点击开始分析。")
             _render_saved_analysis(saved_payload, config, show_progress=True, show_context=True)
         else:
-            if session_manager.config_changed(signature):
+            failure = session_manager.get_failure()
+            failure_payload = (failure or {}).get("payload") if failure else None
+            if failure_payload and failure_payload.get("type") == expected_type:
+                if session_manager.config_changed(signature):
+                    st.warning("配置已变化。以下为上一次抓取结果；如需使用新配置，请点击开始分析。")
+                _render_failure_state(failure_payload, config)
+            elif session_manager.config_changed(signature):
                 st.warning("配置已变化，请重新分析以生成当前包名、地区、语言和评论数量对应的报告。")
         return
 
@@ -1033,7 +1042,7 @@ def _render_analysis_config(page: str) -> dict:
     if mode == "单市场分析":
         st.caption("评论数量")
         review_count = st.number_input("评论数量", min_value=20, max_value=1000, value=DEFAULT_REVIEW_COUNT, step=20)
-        st.caption("默认 50 条可更快生成初步结论；增加样本量可提高结果稳定性，但分析时间和 API 消耗也会增加。")
+        st.caption("默认 80 条；数量越多分析越准确，但会消耗更多 Token 且分析时间更长。")
         st.caption("Claude 每批处理的评论数量")
         batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
         button_label = "开始分析"
@@ -1045,8 +1054,8 @@ def _render_analysis_config(page: str) -> dict:
         button_label = "生成区域洞察"
     else:
         st.caption("每个市场抓取相同数量")
-        review_count = st.number_input("每个市场评论数量", min_value=20, max_value=1000, value=50, step=20)
-        st.caption("默认 50 条可更快生成初步结论；增加样本量可提高结果稳定性，但分析时间和 API 消耗也会增加。")
+        review_count = st.number_input("每个市场评论数量", min_value=20, max_value=1000, value=DEFAULT_REVIEW_COUNT, step=20)
+        st.caption("默认 80 条；数量越多分析越准确，但会消耗更多 Token 且分析时间更长。")
         st.caption("Claude 每批处理的评论数量")
         batch_size = st.slider("Claude 批处理数量", min_value=10, max_value=50, value=25, step=5)
         button_label = "生成跨市场洞察"
@@ -1148,6 +1157,8 @@ def _render_single_market_page(config: dict) -> None:
     started_at = time.perf_counter()
     performance = {"started_at": started_at}
     analysis_timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    package_name = ""
+    prepared: dict | None = None
     try:
         package_name = extract_package_name(raw_input)
         _render_context_bar(package_name, "单市场分析", _format_country(country))
@@ -1182,6 +1193,8 @@ def _render_single_market_page(config: dict) -> None:
             st.write(f"本次分析耗时：{time.perf_counter() - started_at:.1f} 秒")
             return
 
+        _render_stage1_summary(prepared)
+
         progress.update(4, "正在调用 Claude 分类、提取原因并生成中文概括。")
         classify_started = time.perf_counter()
         result = _classify_reviews_with_cache(
@@ -1211,18 +1224,40 @@ def _render_single_market_page(config: dict) -> None:
                 "prepared": prepared,
                 "result": result,
             }
-            _render_basic_stats(prepared)
             _render_data_integrity(debug_payload)
-            st.error("本次分析未成功完成，未生成有效结果。")
+            error_message = "本次分析未成功完成，未生成有效结果。"
+            st.error(error_message)
+            session_manager.save_failure(
+                {
+                    "type": "single",
+                    "package_name": package_name,
+                    "mode": "单市场分析",
+                    "scope": _format_country(country),
+                    "language": lang,
+                    "country": country,
+                    "raw_input": raw_input,
+                    "review_count": int(review_count),
+                    "batch_size": int(batch_size),
+                    "time_mode": config["time_mode"],
+                    "start_date": config["start_date"],
+                    "end_date": config["end_date"],
+                    "prepared": prepared,
+                    "error_message": error_message,
+                },
+                session_manager.AnalysisSignature.from_config(config),
+            )
+            _render_retry_button("retry_single_empty")
             st.caption(_market_sample_notice())
             st.write(f"本次分析耗时：{time.perf_counter() - started_at:.1f} 秒")
             return
-        progress.update(7, "情感分析、市场洞察和 AI 总结已完成。")
+        progress.update(5, "正在识别情感和问题严重度。")
 
         elapsed = time.perf_counter() - started_at
         excluded_evidence_terms = _excluded_evidence_terms(package_name, raw_input)
+        progress.update(6, "正在生成市场洞察。")
         report = build_single_market_report(result, len(result.classified_reviews), excluded_evidence_terms=excluded_evidence_terms)
         performance["evaluation_seconds"] = float(report.pop("_evaluation_elapsed_seconds", 0.0) or 0.0)
+        progress.update(7, "正在计算综合评分与 AI 总结。")
         result, report, summary_error, summary_perf = _apply_single_ai_summary(result, report)
         performance.update(summary_perf)
         performance["total_seconds"] = time.perf_counter() - started_at
@@ -1272,6 +1307,27 @@ def _render_single_market_page(config: dict) -> None:
     except Exception as exc:
         progress.update(4, f"分析中断：{exc}", state="error")
         st.error(f"分析失败：{exc}")
+        if prepared is not None:
+            session_manager.save_failure(
+                {
+                    "type": "single",
+                    "package_name": package_name,
+                    "mode": "单市场分析",
+                    "scope": _format_country(country),
+                    "language": lang,
+                    "country": country,
+                    "raw_input": raw_input,
+                    "review_count": int(review_count),
+                    "batch_size": int(batch_size),
+                    "time_mode": config["time_mode"],
+                    "start_date": config["start_date"],
+                    "end_date": config["end_date"],
+                    "prepared": prepared,
+                    "error_message": f"分析失败：{exc}",
+                },
+                session_manager.AnalysisSignature.from_config(config),
+            )
+            _render_retry_button("retry_single_exception")
 
 
 def _render_market_comparison_page(config: dict) -> None:
@@ -1303,19 +1359,20 @@ def _render_market_comparison_page(config: dict) -> None:
 
     started_at = time.perf_counter()
     progress_tracker = progress_ui.ProgressTracker()
+    package_name = ""
+    fetch_states: list[dict] = []
     try:
         package_name = extract_package_name(raw_input)
         _render_context_bar(package_name, "跨市场分析", analysis_level)
         st.caption(_region_sample_notice() if analysis_level == "区域对比" else _market_sample_notice())
 
-        country_results = []
         progress_tracker.update(1, "准备开始跨市场分析。")
         country_plan = _build_country_plan(analysis_level, selected_items)
 
         for index, plan_item in enumerate(country_plan, start=1):
-            progress_tracker.update(4, f"正在处理 {_format_country(plan_item['country'])} · {index} / {len(country_plan)}")
-            country_results.append(
-                _run_country_analysis(
+            progress_tracker.update(1, f"正在抓取 {_format_country(plan_item['country'])} 评论 · {index} / {len(country_plan)}")
+            fetch_states.append(
+                _fetch_country_prepared(
                     package_name=package_name,
                     country=plan_item["country"],
                     region=plan_item["region"],
@@ -1323,6 +1380,21 @@ def _render_market_comparison_page(config: dict) -> None:
                     specified_language=specified_language,
                     keep_other_languages=keep_other_languages,
                     review_count=int(review_count),
+                    time_mode=config["time_mode"],
+                    start_date=config["start_date"],
+                    end_date=config["end_date"],
+                )
+            )
+
+        _render_stage1_market_summary(fetch_states)
+
+        country_results = []
+        for index, fetch_state in enumerate(fetch_states, start=1):
+            progress_tracker.update(4, f"正在处理 {_format_country(fetch_state['country'])} AI 分类 · {index} / {len(fetch_states)}")
+            country_results.append(
+                _finish_country_analysis(
+                    fetch_state,
+                    package_name=package_name,
                     batch_size=int(batch_size),
                     time_mode=config["time_mode"],
                     start_date=config["start_date"],
@@ -1344,8 +1416,11 @@ def _render_market_comparison_page(config: dict) -> None:
         ]
         progress_tracker.update(7, "正在生成中文跨市场总结。")
         if len(valid_pairs) >= 2:
-            summary_payload = tuple(_build_summary_payload(item, row) for item, row in valid_pairs)
-            comparison_summary = _cached_market_summary(summary_payload)
+            try:
+                summary_payload = tuple(_build_summary_payload(item, row) for item, row in valid_pairs)
+                comparison_summary = _cached_market_summary(summary_payload)
+            except Exception:
+                comparison_summary = "各市场分析结果已保留，但生成跨市场中文总结时失败，请稍后点击“重新进行 AI 分析”重试。"
         else:
             comparison_summary = "可评分市场不足 2 个，暂不生成跨市场高低分结论；请扩大时间范围、调整语言或增加样本。"
         elapsed = time.perf_counter() - started_at
@@ -1375,6 +1450,18 @@ def _render_market_comparison_page(config: dict) -> None:
     except Exception as exc:
         progress_tracker.update(4, f"跨市场分析中断：{exc}", state="error")
         st.error(f"跨市场对比失败：{exc}")
+        if fetch_states:
+            session_manager.save_failure(
+                {
+                    "type": "market",
+                    "package_name": package_name,
+                    "analysis_level": analysis_level,
+                    "fetch_states": fetch_states,
+                    "error_message": f"跨市场对比失败：{exc}",
+                },
+                session_manager.AnalysisSignature.from_config(config),
+            )
+            _render_retry_button("retry_market_exception")
 
 
 def _render_saved_records_market_comparison(config: dict) -> None:
@@ -1486,7 +1573,7 @@ def _build_country_plan(analysis_level: str, selected_items: list[str]) -> list[
     ]
 
 
-def _run_country_analysis(
+def _fetch_country_prepared(
     package_name: str,
     country: str,
     region: str,
@@ -1494,7 +1581,6 @@ def _run_country_analysis(
     specified_language: str | None,
     keep_other_languages: bool,
     review_count: int,
-    batch_size: int,
     time_mode: str,
     start_date: str,
     end_date: str,
@@ -1536,10 +1622,39 @@ def _run_country_analysis(
             "status_message": failure_message,
             "error_type": type(exc).__name__,
             "error_message": str(exc),
+            "fetch_failed": True,
         }
 
     final_sample_count = int(prepared.get("language_filtered_count", 0) or 0)
     scoring_status, status_message = _market_scoring_status(prepared)
+    return {
+        **base_item,
+        "prepared": prepared,
+        "scoring_status": scoring_status,
+        "status_message": status_message,
+        "final_sample_count": final_sample_count,
+        "fetch_failed": False,
+    }
+
+
+def _finish_country_analysis(
+    fetch_state: dict,
+    package_name: str,
+    batch_size: int,
+    time_mode: str,
+    start_date: str,
+    end_date: str,
+) -> dict:
+    state = dict(fetch_state)
+    if state.pop("fetch_failed", False):
+        return state
+
+    prepared = state["prepared"]
+    country = state["country"]
+    lang = state["language"]
+    scoring_status = state["scoring_status"]
+    status_message = state["status_message"]
+
     if scoring_status == "scorable":
         try:
             result = _classify_reviews_with_cache(
@@ -1556,30 +1671,51 @@ def _run_country_analysis(
                 scoring_status = "insufficient_sample"
                 status_message = f"当前成功分类仅{len(result.classified_reviews)}条，样本不足，不具备稳定评分条件。"
         except Exception as exc:
-            result = _empty_analysis_result()
-            scoring_status = "request_failed"
-            status_message = "该市场评论分类失败，其他市场结果已保留。"
             return {
-                **base_item,
-                "prepared": prepared,
-                "result": result,
-                "scoring_status": scoring_status,
-                "status_message": status_message,
+                **state,
+                "result": _empty_analysis_result(),
+                "scoring_status": "request_failed",
+                "status_message": "该市场评论分类失败，其他市场结果已保留。",
                 "error_type": type(exc).__name__,
                 "error_message": str(exc),
-                "final_sample_count": final_sample_count,
             }
     else:
         result = _empty_analysis_result()
 
     return {
-        **base_item,
-        "prepared": prepared,
+        **state,
         "result": result,
         "scoring_status": scoring_status,
         "status_message": status_message,
-        "final_sample_count": final_sample_count,
     }
+
+
+def _run_country_analysis(
+    package_name: str,
+    country: str,
+    region: str,
+    comment_source: str,
+    specified_language: str | None,
+    keep_other_languages: bool,
+    review_count: int,
+    batch_size: int,
+    time_mode: str,
+    start_date: str,
+    end_date: str,
+) -> dict:
+    fetch_state = _fetch_country_prepared(
+        package_name,
+        country,
+        region,
+        comment_source,
+        specified_language,
+        keep_other_languages,
+        review_count,
+        time_mode,
+        start_date,
+        end_date,
+    )
+    return _finish_country_analysis(fetch_state, package_name, batch_size, time_mode, start_date, end_date)
 
 
 def _empty_analysis_result() -> AnalysisResult:
@@ -1970,6 +2106,71 @@ def _render_basic_stats(prepared: dict) -> None:
     cols[1].metric("清洗后数量", prepared["cleaned_count"])
     cols[2].metric("语言过滤后数量", prepared["language_filtered_count"])
     cols[3].metric("语言不匹配过滤数量", prepared["language_mismatch_count"])
+
+
+def _render_review_preview(prepared: dict, limit: int = 5) -> None:
+    records = prepared.get("filtered_reviews") or prepared.get("cleaned_reviews") or ()
+    if not records:
+        st.caption("暂无可预览的评论。")
+        return
+    reviews = _records_to_reviews(tuple(records[:limit]))
+    preview_df = pd.DataFrame(
+        {
+            "评分": [review.score for review in reviews],
+            "时间": [review.date for review in reviews],
+            "内容": [review.content for review in reviews],
+        }
+    )
+    st.dataframe(preview_df, use_container_width=True, hide_index=True)
+
+
+def _render_stage1_summary(prepared: dict, status_text: str = "评论获取完成，正在进入 AI 分析") -> None:
+    _render_basic_stats(prepared)
+    with st.expander("评论预览", expanded=False):
+        _render_review_preview(prepared)
+    st.info(status_text)
+
+
+def _render_stage1_market_summary(fetch_states: list[dict]) -> None:
+    rows = [
+        {
+            "市场": state.get("market_label", state.get("country", "")),
+            "原始抓取": state.get("prepared", {}).get("raw_count", 0),
+            "清洗后": state.get("prepared", {}).get("cleaned_count", 0),
+            "有效样本": state.get("prepared", {}).get("language_filtered_count", 0),
+            "状态": state.get("status_message", ""),
+        }
+        for state in fetch_states
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    previewable = [
+        state
+        for state in fetch_states
+        if state.get("prepared", {}).get("filtered_reviews") or state.get("prepared", {}).get("cleaned_reviews")
+    ]
+    for state in previewable[:3]:
+        with st.expander(f"{state.get('market_label', state.get('country', ''))} 评论预览"):
+            _render_review_preview(state.get("prepared", {}))
+    st.info("各市场评论获取完成，正在进入 AI 分析")
+
+
+def _render_retry_button(key: str, label: str = "重新进行 AI 分析") -> None:
+    st.button(label, key=key, on_click=lambda: st.session_state.update({RETRY_ANALYSIS_KEY: True}))
+
+
+def _render_failure_state(failure: dict, config: dict) -> None:
+    if failure.get("type") == "single":
+        _render_context_bar(
+            failure.get("package_name", ""),
+            failure.get("mode", "单市场分析"),
+            failure.get("scope", ""),
+        )
+        _render_stage1_summary(failure.get("prepared", {}), status_text="评论获取完成，AI 分析此前未成功。")
+    else:
+        _render_context_bar(failure.get("package_name", ""), "跨市场分析", failure.get("analysis_level", ""))
+        _render_stage1_market_summary(failure.get("fetch_states", []))
+    st.error(failure.get("error_message", "AI 分析失败，请重试。"))
+    _render_retry_button(f"retry_{failure.get('type', 'analysis')}_saved")
 
 
 def _render_saved_analysis(payload: dict, config: dict, show_progress: bool = True, show_context: bool = True) -> None:

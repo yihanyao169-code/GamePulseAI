@@ -14,6 +14,7 @@ SAVED_SINGLE_REPORTS_KEY = "saved_single_market_reports"
 CURRENT_REPORT_KEY = "current_report"
 CURRENT_ANALYSIS_RECORD_ID_KEY = "current_analysis_record_id"
 GENERATED_EXPORTS_KEY = "generated_exports"
+FAILURE_STATE_KEY = "market_analysis_failure_state"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ def save_analysis(payload: dict[str, Any], signature: AnalysisSignature) -> None
     st.session_state.pop(PPT_STATE_KEY, None)
     if stored_payload.get("type") == "single":
         save_single_report(stored_payload)
+    clear_failure()
 
 
 def save_single_report(payload: dict[str, Any]) -> None:
@@ -112,6 +114,22 @@ def clear_analysis() -> None:
     st.session_state.pop(PPT_STATE_KEY, None)
     st.session_state.pop(CURRENT_REPORT_KEY, None)
     st.session_state.pop(CURRENT_ANALYSIS_RECORD_ID_KEY, None)
+    st.session_state.pop(FAILURE_STATE_KEY, None)
+
+
+def save_failure(payload: dict[str, Any], signature: AnalysisSignature) -> None:
+    st.session_state[FAILURE_STATE_KEY] = {"signature": signature, "payload": copy.deepcopy(payload)}
+
+
+def get_failure() -> dict[str, Any] | None:
+    state = st.session_state.get(FAILURE_STATE_KEY)
+    if state:
+        return copy.deepcopy(state)
+    return None
+
+
+def clear_failure() -> None:
+    st.session_state.pop(FAILURE_STATE_KEY, None)
 
 
 def has_current_analysis(signature: AnalysisSignature) -> bool:
