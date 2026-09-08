@@ -524,12 +524,20 @@ def inject_theme_css(theme_choice: str) -> None:
             background: #ffffff !important; color: #111111 !important;
             border: 1px solid #111111 !important; font-weight: 800 !important;
         }}
+        .st-key-home_actions div[data-testid="stButton"] button *,
+        .st-key-home_actions div[data-testid="stButton"] button {{
+            color: #111111 !important;
+        }}
         .st-key-home_actions div[data-testid="stButton"] button:hover {{
             filter: brightness(.96);
         }}
         .st-key-home_workspace_action div[data-testid="stButton"] button {{
             background: var(--gp-yellow) !important; color: var(--gp-on-accent) !important;
             border: 1px solid var(--gp-on-accent) !important; font-weight: 800 !important;
+        }}
+        .st-key-home_workspace_action div[data-testid="stButton"] button *,
+        .st-key-home_workspace_action div[data-testid="stButton"] button {{
+            color: #111111 !important;
         }}
         .st-key-home_workspace_action div[data-testid="stButton"] button:hover {{
             filter: brightness(.94);
