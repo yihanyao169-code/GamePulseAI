@@ -13,27 +13,13 @@ from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import pandas as pd
+_SCRIPT_STARTED_AT = time.perf_counter()
+
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
-from src.analyzer import (
-    CLASSIFICATION_PROMPT_VERSION,
-    CLASSIFICATION_SCHEMA_VERSION,
-    classify_reviews,
-    summarize_market_comparison,
-    summarize_single_market_report,
-)
-from src.charts import (
-    create_bar_chart,
-    create_market_bar_chart,
-    create_market_category_distribution_chart,
-    create_pie_chart,
-)
 from src.cleaning import clean_reviews
-from src.claude_client import ClaudeClient
 from src.cross_game import build_cross_game_rows, build_cross_game_summary, public_row
 from src.google_play import FETCH_CACHE_VERSION, extract_package_name, fetch_reviews_with_meta
 from src.language_filter import filter_reviews_by_language
@@ -69,7 +55,6 @@ from src.methodology import (
     severity_standards,
 )
 from src.representative_reviews import select_representative_reviews
-from src.ppt_exporter import export_market_comparison_ppt, export_ppt
 from src import progress_ui
 from src.reporting import sort_category_counts
 from src import session_manager
@@ -261,6 +246,9 @@ def _render_homepage() -> None:
 
 
 def _render_cross_game_comparison_view(rows: list[dict], theme_mode: str) -> None:
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
     st.markdown("#### 对比指标")
     st.dataframe(
         pd.DataFrame([_localize_cross_game_row(public_row(row)) for row in rows]),
@@ -752,6 +740,8 @@ def _localize_cross_game_row(row: dict) -> dict:
 
 
 def _create_cross_game_radar_chart(rows: list[dict], theme_mode: str):
+    import matplotlib.pyplot as plt
+
     labels = ["Overall Score", "Product Health", "Satisfaction", "Strengths", "Confidence"]
     metric_keys = ["Overall", "Health", "Satisfaction", "Strength", "Confidence"]
     angles = [index / float(len(labels)) * 2 * 3.141592653589793 for index in range(len(labels))]
@@ -1998,6 +1988,9 @@ def _classify_reviews_with_cache(
     start_date: str,
     end_date: str,
 ):
+    from src.analyzer import classify_reviews
+    from src.claude_client import ClaudeClient
+
     cache_key = _classification_cache_key(
         package_name,
         country,
@@ -2033,6 +2026,8 @@ def _classification_cache_key(
     start_date: str,
     end_date: str,
 ) -> str:
+    from src.analyzer import CLASSIFICATION_PROMPT_VERSION, CLASSIFICATION_SCHEMA_VERSION
+
     review_text = "\n".join(f"{record[0]}|{record[2]}|{record[3]}" for record in review_records)
     review_hash = hashlib.sha256(review_text.encode("utf-8")).hexdigest()
     model = os.getenv("CLAUDE_CLASSIFY_MODEL") or os.getenv("CLAUDE_MODEL") or "default"
@@ -2057,6 +2052,8 @@ def _classification_cache_key(
 
 
 def _valid_cached_result(result, expected_count: int) -> bool:
+    from src.analyzer import CLASSIFICATION_SCHEMA_VERSION
+
     if not isinstance(result, AnalysisResult):
         return False
     diagnostics = getattr(result, "batch_diagnostics", None)
@@ -2079,6 +2076,9 @@ def _valid_cached_result(result, expected_count: int) -> bool:
 
 @st.cache_data(show_spinner=False)
 def _cached_market_summary(summary_payload: tuple[dict, ...]) -> str:
+    from src.analyzer import summarize_market_comparison
+    from src.claude_client import ClaudeClient
+
     claude_client = ClaudeClient()
     return summarize_market_comparison(list(summary_payload), claude_client)
 
@@ -2109,6 +2109,8 @@ def _render_basic_stats(prepared: dict) -> None:
 
 
 def _render_review_preview(prepared: dict, limit: int = 5) -> None:
+    import pandas as pd
+
     records = prepared.get("filtered_reviews") or prepared.get("cleaned_reviews") or ()
     if not records:
         st.caption("暂无可预览的评论。")
@@ -2132,6 +2134,8 @@ def _render_stage1_summary(prepared: dict, status_text: str = "评论获取完�
 
 
 def _render_stage1_market_summary(fetch_states: list[dict]) -> None:
+    import pandas as pd
+
     rows = [
         {
             "市场": state.get("market_label", state.get("country", "")),
@@ -2180,6 +2184,9 @@ def _render_saved_analysis(payload: dict, config: dict, show_progress: bool = Tr
             _render_context_bar(payload["package_name"], payload["mode"], payload["scope"])
         if show_progress:
             progress_ui.render_saved_complete()
+        with st.spinner("正在准备图表..."):
+            from src.charts import create_bar_chart, create_pie_chart
+
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             result = payload["result"]
@@ -2458,6 +2465,9 @@ def _render_data_scope_card(payload: dict) -> None:
 
 
 def _apply_single_ai_summary(result: AnalysisResult, report: dict) -> tuple[AnalysisResult, dict, str, dict]:
+    from src.analyzer import summarize_single_market_report
+    from src.claude_client import ClaudeClient
+
     summary_perf: dict = {}
     try:
         summary_model = os.getenv("CLAUDE_SUMMARY_MODEL") or os.getenv("CLAUDE_MODEL")
@@ -2857,6 +2867,8 @@ def _render_market_comparison(
 
 
 def _render_market_comparison_saved(payload: dict, config: dict) -> None:
+    import pandas as pd
+
     rows = payload["rows"]
     market_results = payload["market_results"]
     comparison_summary = payload["comparison_summary"]
@@ -2929,6 +2941,8 @@ def _render_market_comparison_saved(payload: dict, config: dict) -> None:
 
 
 def _create_market_charts_for_payload(payload: dict, temp_path: Path, theme_mode: str) -> list[Path]:
+    from src.charts import create_market_bar_chart, create_market_category_distribution_chart
+
     rows = payload["rows"]
     entity_name = "Region" if payload["analysis_level"] == "区域对比" else "Market"
     negative_chart = create_market_bar_chart(rows, "负面占比", f"Negative Reviews by {entity_name}", temp_path / "negative.png", theme_mode=theme_mode)
@@ -3552,6 +3566,9 @@ def _payload_final_sample_count(payload: dict) -> int:
 
 
 def _generate_ppt_bytes(payload: dict, filename: str) -> bytes:
+    from src.charts import create_bar_chart, create_pie_chart
+    from src.ppt_exporter import export_market_comparison_ppt, export_ppt
+
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         output_path = temp_path / filename
@@ -3730,4 +3747,7 @@ def _region_sample_notice() -> str:
 
 
 if __name__ == "__main__":
+    print(f"[startup] imports_ready_seconds={time.perf_counter() - _SCRIPT_STARTED_AT:.3f}", flush=True)
+    _render_started_at = time.perf_counter()
     main()
+    print(f"[startup] page_render_seconds={time.perf_counter() - _render_started_at:.3f}", flush=True)
