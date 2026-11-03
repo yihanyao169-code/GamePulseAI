@@ -519,7 +519,21 @@ def inject_theme_css(theme_choice: str) -> None:
           .mi-scroll-hint__arrow {{ animation: none !important; }}
         }}
         .st-key-home_actions {{margin-top: 28px;}}
-        .st-key-home_actions div[data-testid="stHorizontalBlock"] {{gap: 24px !important;}}
+        .st-key-home_hero_grid .st-key-home_actions div[data-testid="stHorizontalBlock"] {{
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 24px !important;
+        }}
+        .st-key-home_hero_grid .st-key-home_actions div[data-testid="column"],
+        .st-key-home_hero_grid .st-key-home_actions div[data-testid="stColumn"] {{
+            width: auto !important; min-width: 0 !important;
+        }}
+        @media (max-width: 640px) {{
+          .st-key-home_hero_grid .st-key-home_actions div[data-testid="stHorizontalBlock"] {{
+              grid-template-columns: 1fr;
+              gap: 16px !important;
+          }}
+        }}
         .st-key-home_actions div[data-testid="stButton"] button {{
             background: #ffffff !important; color: #111111 !important;
             border: 1px solid #111111 !important; font-weight: 800 !important;
